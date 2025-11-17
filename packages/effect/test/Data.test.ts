@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Data, Equal, pipe } from "effect"
-import { assertFalse, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 describe("Data", () => {
   it("struct", () => {
@@ -124,6 +124,15 @@ describe("Data", () => {
     const b = Data.struct({ date: new Date(date.toISOString()) })
 
     assertTrue(Equal.equals(a, b))
+  })
+
+  it("URL compares by value", () => {
+    const a = Data.struct({ date: new URL("http://example.com") })
+    const b = Data.struct({ date: new URL("http://example.com") })
+    const c = Data.struct({ date: new URL("https://effect.website") })
+
+    assertTrue(Equal.equals(a, b))
+    assertFalse(Equal.equals(a, c))
   })
 
   it("tagged class", () => {

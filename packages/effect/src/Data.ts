@@ -309,10 +309,10 @@ export declare namespace TaggedEnum {
     readonly taggedEnum: { readonly _tag: string }
     readonly numberOfGenerics: Count
 
-    readonly A: any
-    readonly B: any
-    readonly C: any
-    readonly D: any
+    readonly A: unknown
+    readonly B: unknown
+    readonly C: unknown
+    readonly D: unknown
   }
 
   /**
@@ -361,15 +361,20 @@ export declare namespace TaggedEnum {
       readonly $is: <Tag extends A["_tag"]>(tag: Tag) => (u: unknown) => u is Extract<A, { readonly _tag: Tag }>
       readonly $match: {
         <
-          Cases extends {
+          const Cases extends {
             readonly [Tag in A["_tag"]]: (args: Extract<A, { readonly _tag: Tag }>) => any
           }
-        >(cases: Cases): (value: A) => Unify<ReturnType<Cases[A["_tag"]]>>
+        >(
+          cases: Cases & { [K in Exclude<keyof Cases, A["_tag"]>]: never }
+        ): (value: A) => Unify<ReturnType<Cases[A["_tag"]]>>
         <
-          Cases extends {
+          const Cases extends {
             readonly [Tag in A["_tag"]]: (args: Extract<A, { readonly _tag: Tag }>) => any
           }
-        >(value: A, cases: Cases): Unify<ReturnType<Cases[A["_tag"]]>>
+        >(
+          value: A,
+          cases: Cases & { [K in Exclude<keyof Cases, A["_tag"]>]: never }
+        ): Unify<ReturnType<Cases[A["_tag"]]>>
       }
     }
   >
@@ -398,7 +403,7 @@ export declare namespace TaggedEnum {
           ) => any
         }
       >(
-        cases: Cases
+        cases: Cases & { [K in Exclude<keyof Cases, Z["taggedEnum"]["_tag"]>]: never }
       ): (self: TaggedEnum.Kind<Z, A, B, C, D>) => Unify<ReturnType<Cases[Z["taggedEnum"]["_tag"]]>>
       <
         A,
@@ -412,7 +417,7 @@ export declare namespace TaggedEnum {
         }
       >(
         self: TaggedEnum.Kind<Z, A, B, C, D>,
-        cases: Cases
+        cases: Cases & { [K in Exclude<keyof Cases, Z["taggedEnum"]["_tag"]>]: never }
       ): Unify<ReturnType<Cases[Z["taggedEnum"]["_tag"]]>>
     }
   }
@@ -555,18 +560,22 @@ export const Error: new<A extends Record<string, any> = {}>(
     : { readonly [P in keyof A]: A[P] }
 ) => Cause.YieldableError & Readonly<A> = (function() {
   const plainArgsSymbol = Symbol.for("effect/Data/Error/plainArgs")
-  return class Base extends core.YieldableError {
-    constructor(args: any) {
-      super(args?.message, args?.cause ? { cause: args.cause } : undefined)
-      if (args) {
-        Object.assign(this, args)
-        Object.defineProperty(this, plainArgsSymbol, { value: args, enumerable: false })
+  const O = {
+    BaseEffectError: class extends core.YieldableError {
+      constructor(args: any) {
+        super(args?.message, args?.cause ? { cause: args.cause } : undefined)
+        if (args) {
+          Object.assign(this, args)
+          // @effect-diagnostics-next-line floatingEffect:off
+          Object.defineProperty(this, plainArgsSymbol, { value: args, enumerable: false })
+        }
       }
-    }
-    toJSON() {
-      return { ...(this as any)[plainArgsSymbol], ...this }
-    }
-  } as any
+      toJSON() {
+        return { ...(this as any)[plainArgsSymbol], ...this }
+      }
+    } as any
+  }
+  return O.BaseEffectError
 })()
 
 /**
@@ -577,9 +586,11 @@ export const TaggedError = <Tag extends string>(tag: Tag): new<A extends Record<
   args: Types.Equals<A, {}> extends true ? void
     : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P] }
 ) => Cause.YieldableError & { readonly _tag: Tag } & Readonly<A> => {
-  class Base extends Error<{}> {
-    readonly _tag = tag
+  const O = {
+    BaseEffectError: class extends Error<{}> {
+      readonly _tag = tag
+    }
   }
-  ;(Base.prototype as any).name = tag
-  return Base as any
+  ;(O.BaseEffectError.prototype as any).name = tag
+  return O.BaseEffectError as any
 }

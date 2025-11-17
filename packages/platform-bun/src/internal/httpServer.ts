@@ -14,7 +14,7 @@ import type * as Multipart from "@effect/platform/Multipart"
 import type * as Path from "@effect/platform/Path"
 import * as Socket from "@effect/platform/Socket"
 import * as UrlParams from "@effect/platform/UrlParams"
-import type { ServeOptions, Server as BunServer, ServerWebSocket } from "bun"
+import type { Server as BunServer, ServerWebSocket, WebSocketServeOptions } from "bun"
 import * as Config from "effect/Config"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -29,11 +29,12 @@ import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as BunContext from "../BunContext.js"
 import * as Platform from "../BunHttpPlatform.js"
+import type * as BunHttpServer from "../BunHttpServer.js"
 import * as MultipartBun from "./multipart.js"
 
 /** @internal */
-export const make = (
-  options: Omit<ServeOptions, "fetch" | "error">
+export const make = <R extends { [K in keyof R]: Bun.RouterTypes.RouteValue<Extract<K, string>> } = {}>(
+  options: BunHttpServer.ServeOptions<R>
 ): Effect.Effect<Server.HttpServer, never, Scope.Scope> =>
   Effect.gen(function*() {
     const handlerStack: Array<(request: Request, server: BunServer) => Response | Promise<Response>> = [
@@ -41,8 +42,8 @@ export const make = (
         return new Response("not found", { status: 404 })
       }
     ]
-    const server = Bun.serve<WebSocketContext>({
-      ...options,
+    const server = Bun.serve<WebSocketContext, R>({
+      ...options as WebSocketServeOptions<WebSocketContext>,
       fetch: handlerStack[0],
       websocket: {
         open(ws) {
@@ -69,7 +70,7 @@ export const make = (
     )
 
     return Server.make({
-      address: { _tag: "TcpAddress", port: server.port, hostname: server.hostname },
+      address: { _tag: "TcpAddress", port: server.port!, hostname: server.hostname! },
       serve(httpApp, middleware) {
         return Effect.gen(function*() {
           const runFork = yield* FiberSet.makeRuntime<never>()
@@ -95,12 +96,12 @@ export const make = (
           yield* Effect.acquireRelease(
             Effect.sync(() => {
               handlerStack.push(handler)
-              server.reload({ fetch: handler } as ServeOptions)
+              server.reload({ fetch: handler })
             }),
             () =>
               Effect.sync(() => {
                 handlerStack.pop()
-                server.reload({ fetch: handlerStack[handlerStack.length - 1] } as ServeOptions)
+                server.reload({ fetch: handlerStack[handlerStack.length - 1] })
               })
           )
         })
@@ -135,6 +136,7 @@ const makeResponse = (
   if (request.method === "HEAD") {
     return new Response(undefined, fields)
   }
+  response = App.unsafeEjectStreamScope(response)
   const body = response.body
   switch (body._tag) {
     case "Empty": {
@@ -142,6 +144,12 @@ const makeResponse = (
     }
     case "Uint8Array":
     case "Raw": {
+      if (body.body instanceof Response) {
+        for (const [key, value] of fields.headers.entries()) {
+          body.body.headers.set(key, value)
+        }
+        return body.body
+      }
       return new Response(body.body as any, fields)
     }
     case "FormData": {
@@ -157,8 +165,8 @@ const makeResponse = (
 }
 
 /** @internal */
-export const layerServer = (
-  options: Omit<ServeOptions, "fetch" | "error">
+export const layerServer = <R extends { [K in keyof R]: Bun.RouterTypes.RouteValue<Extract<K, string>> } = {}>(
+  options: BunHttpServer.ServeOptions<R>
 ) => Layer.scoped(Server.HttpServer, make(options))
 
 /** @internal */
@@ -169,8 +177,8 @@ export const layerContext = Layer.mergeAll(
 )
 
 /** @internal */
-export const layer = (
-  options: Omit<ServeOptions, "fetch" | "error">
+export const layer = <R extends { [K in keyof R]: Bun.RouterTypes.RouteValue<Extract<K, string>> } = {}>(
+  options: BunHttpServer.ServeOptions<R>
 ) =>
   Layer.mergeAll(
     Layer.scoped(Server.HttpServer, make(options)),
@@ -186,8 +194,8 @@ export const layerTest = Server.layerTestClient.pipe(
 )
 
 /** @internal */
-export const layerConfig = (
-  options: Config.Config.Wrap<Omit<ServeOptions, "fetch" | "error">>
+export const layerConfig = <R extends { [K in keyof R]: Bun.RouterTypes.RouteValue<Extract<K, string>> } = {}>(
+  options: Config.Config.Wrap<BunHttpServer.ServeOptions<R>>
 ) =>
   Layer.mergeAll(
     Layer.scoped(Server.HttpServer, Effect.flatMap(Config.unwrap(options), make)),
@@ -402,43 +410,49 @@ class ServerRequestImpl extends Inspectable.Class implements ServerRequest.HttpS
           resume(Effect.map(Deferred.await(deferred), (ws) => {
             const write = (chunk: Uint8Array | string | Socket.CloseEvent) =>
               Effect.sync(() => {
-                typeof chunk === "string"
-                  ? ws.sendText(chunk)
-                  : Socket.isCloseEvent(chunk)
-                  ? ws.close(chunk.code, chunk.reason)
-                  : ws.sendBinary(chunk)
+                if (typeof chunk === "string") {
+                  ws.sendText(chunk)
+                } else if (Socket.isCloseEvent(chunk)) {
+                  ws.close(chunk.code, chunk.reason)
+                } else {
+                  ws.sendBinary(chunk)
+                }
+
                 return true
               })
             const writer = Effect.succeed(write)
-            const runRaw = <R, E, _>(
-              handler: (_: Uint8Array | string) => Effect.Effect<_, E, R> | void
-            ): Effect.Effect<void, Socket.SocketError | E, R> =>
-              FiberSet.make<any, E>().pipe(
-                Effect.flatMap((set) =>
-                  FiberSet.runtime(set)<R>().pipe(
-                    Effect.flatMap((run) => {
-                      function runRaw(data: Uint8Array | string) {
-                        const result = handler(data)
-                        if (Effect.isEffect(result)) {
-                          run(result)
-                        }
-                      }
-                      ws.data.run = runRaw
-                      ws.data.buffer.forEach(runRaw)
-                      ws.data.buffer.length = 0
-                      return FiberSet.join(set)
-                    })
-                  )
-                ),
-                Effect.scoped,
-                Effect.onExit((exit) => Effect.sync(() => ws.close(exit._tag === "Success" ? 1000 : 1011))),
-                Effect.raceFirst(Deferred.await(closeDeferred)),
-                semaphore.withPermits(1)
-              )
+            const runRaw = Effect.fnUntraced(
+              function*<R, E, _>(
+                handler: (_: Uint8Array | string) => Effect.Effect<_, E, R> | void,
+                opts?: { readonly onOpen?: Effect.Effect<void> | undefined }
+              ) {
+                const set = yield* FiberSet.make<any, E>()
+                const run = yield* FiberSet.runtime(set)<R>()
+                function runRaw(data: Uint8Array | string) {
+                  const result = handler(data)
+                  if (Effect.isEffect(result)) {
+                    run(result)
+                  }
+                }
+                ws.data.run = runRaw
+                ws.data.buffer.forEach(runRaw)
+                ws.data.buffer.length = 0
+                if (opts?.onOpen) yield* opts.onOpen
+                return yield* FiberSet.join(set)
+              },
+              Effect.scoped,
+              Effect.onExit((exit) => {
+                ws.close(exit._tag === "Success" ? 1000 : 1011)
+                return Effect.void
+              }),
+              Effect.raceFirst(Deferred.await(closeDeferred)),
+              semaphore.withPermits(1)
+            )
 
             const encoder = new TextEncoder()
-            const run = <R, E, _>(handler: (_: Uint8Array) => Effect.Effect<_, E, R> | void) =>
-              runRaw((data) => typeof data === "string" ? handler(encoder.encode(data)) : handler(data))
+            const run = <R, E, _>(handler: (_: Uint8Array) => Effect.Effect<_, E, R> | void, opts?: {
+              readonly onOpen?: Effect.Effect<void> | undefined
+            }) => runRaw((data) => typeof data === "string" ? handler(encoder.encode(data)) : handler(data), opts)
 
             return Socket.Socket.of({
               [Socket.TypeId]: Socket.TypeId,

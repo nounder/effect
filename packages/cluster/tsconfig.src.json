@@ -5,7 +5,8 @@
     { "path": "../effect" },
     { "path": "../platform" },
     { "path": "../rpc" },
-    { "path": "../sql" }
+    { "path": "../sql" },
+    { "path": "../workflow" }
   ],
   "compilerOptions": {
     "tsBuildInfoFile": ".tsbuildinfo/src.tsbuildinfo",

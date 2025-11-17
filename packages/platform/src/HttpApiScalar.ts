@@ -2,10 +2,13 @@
  * @since 1.0.0
  */
 import * as Effect from "effect/Effect"
-import type { Layer } from "effect/Layer"
+import * as Layer from "effect/Layer"
 import { Api } from "./HttpApi.js"
+import type * as HttpApi from "./HttpApi.js"
 import { Router } from "./HttpApiBuilder.js"
+import * as HttpLayerRouter from "./HttpLayerRouter.js"
 import * as HttpServerResponse from "./HttpServerResponse.js"
+import * as Html from "./internal/html.js"
 import * as internal from "./internal/httpApiScalar.js"
 import * as OpenApi from "./OpenApi.js"
 
@@ -20,25 +23,12 @@ export type ScalarThemeId =
   | "purple"
   | "solarized"
   | "bluePlanet"
-  | "deepSpace"
   | "saturn"
   | "kepler"
   | "mars"
+  | "deepSpace"
+  | "laserwave"
   | "none"
-
-/**
- * @since 1.0.0
- * @category model
- *
- * cdn: `https://cdn.jsdelivr.net/npm/@scalar/api-reference@${source.version}/dist/browser/standalone.min.js`
- */
-export type ScalarScriptSource =
-  | string
-  | { type: "default" }
-  | {
-    type: "cdn"
-    version?: "latest" | (string & {})
-  }
 
 /**
  * @see https://github.com/scalar/scalar/blob/main/documentation/configuration.md
@@ -52,9 +42,7 @@ export type ScalarConfig = {
   /** The layout to use for the references */
   layout?: "modern" | "classic"
   /** URL to a request proxy for the API client */
-  proxy?: string
-  /** Whether the spec input should show */
-  isEditable?: boolean
+  proxyUrl?: string
   /** Whether to show the sidebar */
   showSidebar?: boolean
   /**
@@ -63,12 +51,6 @@ export type ScalarConfig = {
    * Default: `false`
    */
   hideModels?: boolean
-  /**
-   * Whether to show the “Download OpenAPI Document” button
-   *
-   * Default: `false`
-   */
-  hideDownloadButton?: boolean
   /**
    * Whether to show the “Test Request” button
    *
@@ -119,70 +101,166 @@ export type ScalarConfig = {
   defaultOpenAllTags?: boolean
 }
 
-/**
- * @since 1.0.0
- * @category layers
- */
-export const layer = (options?: {
-  readonly path?: `/${string}` | undefined
-  readonly source?: ScalarScriptSource
+const makeHandler = (options: {
+  readonly api: HttpApi.HttpApi.Any
+  readonly source: {
+    readonly _tag: "Cdn"
+    readonly version?: string | undefined
+  } | {
+    readonly _tag: "Inline"
+    readonly source: string
+  }
   readonly scalar?: ScalarConfig
-}): Layer<never, never, Api> =>
-  Router.use((router) =>
-    Effect.gen(function*() {
-      const { api } = yield* Api
-      const spec = OpenApi.fromApi(api)
+}) => {
+  const spec = OpenApi.fromApi(options.api as any)
 
-      const source = options?.source
-      const defaultScript = internal.javascript
-      const src: string | null = source
-        ? typeof source === "string"
-          ? source
-          : source.type === "cdn"
-          ? `https://cdn.jsdelivr.net/npm/@scalar/api-reference@${
-            source.version ?? "latest"
-          }/dist/browser/standalone.min.js`
-          : null
-        : null
+  const source = options?.source
 
-      const scalarConfig = {
-        _integration: "http",
-        ...options?.scalar
-      }
+  const scalarConfig = {
+    _integration: "html",
+    ...options?.scalar
+  }
 
-      const response = HttpServerResponse.html(`<!doctype html>
+  const response = HttpServerResponse.html(`<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>${spec.info.title}</title>
+    <title>${Html.escape(spec.info.title)}</title>
     ${
-        !spec.info.description
-          ? ""
-          : `<meta name="description" content="${spec.info.description}"/>`
-      }
+    !spec.info.description
+      ? ""
+      : `<meta name="description" content="${Html.escape(spec.info.description)}"/>`
+  }
     ${
-        !spec.info.description
-          ? ""
-          : `<meta name="og:description" content="${spec.info.description}"/>`
-      }
+    !spec.info.description
+      ? ""
+      : `<meta name="og:description" content="${Html.escape(spec.info.description)}"/>`
+  }
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1" />
   </head>
   <body>
     <script id="api-reference" type="application/json">
-      ${JSON.stringify(spec)}
+      ${Html.escapeJson(spec)}
     </script>
     <script>
-      document.getElementById('api-reference').dataset.configuration = JSON.stringify(${JSON.stringify(scalarConfig)})
+      document.getElementById('api-reference').dataset.configuration = JSON.stringify(${Html.escapeJson(scalarConfig)})
     </script>
     ${
-        src
-          ? `<script src="${src}" crossorigin></script>`
-          : `<script>${defaultScript}</script>`
-      }
+    source._tag === "Cdn"
+      ? `<script src="${`https://cdn.jsdelivr.net/npm/@scalar/api-reference@${
+        source.version ?? "latest"
+      }/dist/browser/standalone.min.js`}" crossorigin></script>`
+      : `<script>${source.source}</script>`
+  }
   </body>
 </html>`)
-      yield* router.get(options?.path ?? "/docs", Effect.succeed(response))
+
+  return Effect.succeed(response)
+}
+
+/**
+ * @since 1.0.0
+ * @category layers
+ */
+export const layer = (options?: {
+  readonly path?: `/${string}` | undefined
+  readonly scalar?: ScalarConfig
+}): Layer.Layer<never, never, Api> =>
+  Router.use(Effect.fnUntraced(function*(router) {
+    const { api } = yield* Api
+    const handler = makeHandler({
+      ...options,
+      api,
+      source: {
+        _tag: "Inline",
+        source: internal.javascript
+      }
     })
-  )
+    yield* router.get(options?.path ?? "/docs", handler)
+  }))
+
+/**
+ * @since 1.0.0
+ * @category layers
+ */
+export const layerCdn = (options?: {
+  readonly path?: `/${string}` | undefined
+  readonly scalar?: ScalarConfig
+  readonly version?: string | undefined
+}): Layer.Layer<never, never, Api> =>
+  Router.use(Effect.fnUntraced(function*(router) {
+    const { api } = yield* Api
+    const handler = makeHandler({
+      ...options,
+      api,
+      source: {
+        _tag: "Cdn",
+        version: options?.version
+      }
+    })
+    yield* router.get(options?.path ?? "/docs", handler)
+  }))
+
+/**
+ * @since 1.0.0
+ * @category layers
+ */
+export const layerHttpLayerRouter: (
+  options: {
+    readonly api: HttpApi.HttpApi.Any
+    readonly path: `/${string}`
+    readonly scalar?: ScalarConfig
+  }
+) => Layer.Layer<
+  never,
+  never,
+  HttpLayerRouter.HttpRouter
+> = Effect.fnUntraced(function*(options: {
+  readonly api: HttpApi.HttpApi.Any
+  readonly path: `/${string}`
+  readonly scalar?: ScalarConfig
+}) {
+  const router = yield* HttpLayerRouter.HttpRouter
+  const handler = makeHandler({
+    ...options,
+    source: {
+      _tag: "Inline",
+      source: internal.javascript
+    }
+  })
+  yield* router.add("GET", options.path, handler)
+}, Layer.effectDiscard)
+
+/**
+ * @since 1.0.0
+ * @category layers
+ */
+export const layerHttpLayerRouterCdn: (
+  options: {
+    readonly api: HttpApi.HttpApi.Any
+    readonly path: `/${string}`
+    readonly version?: string | undefined
+    readonly scalar?: ScalarConfig
+  }
+) => Layer.Layer<
+  never,
+  never,
+  HttpLayerRouter.HttpRouter
+> = Effect.fnUntraced(function*(options: {
+  readonly api: HttpApi.HttpApi.Any
+  readonly path: `/${string}`
+  readonly version?: string | undefined
+  readonly scalar?: ScalarConfig
+}) {
+  const router = yield* HttpLayerRouter.HttpRouter
+  const handler = makeHandler({
+    ...options,
+    source: {
+      _tag: "Cdn",
+      version: options?.version
+    }
+  })
+  yield* router.add("GET", options.path, handler)
+}, Layer.effectDiscard)

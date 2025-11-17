@@ -1,5 +1,16 @@
 import { describe, it } from "@effect/vitest"
 import {
+  assertFalse,
+  assertInclude,
+  assertLeft,
+  assertNone,
+  assertRight,
+  assertSome,
+  assertTrue,
+  deepStrictEqual,
+  strictEqual
+} from "@effect/vitest/utils"
+import {
   Array as Arr,
   Cause,
   Effect,
@@ -11,19 +22,8 @@ import {
   Option,
   Predicate
 } from "effect"
-import * as internal from "effect/internal/cause"
-import {
-  assertFalse,
-  assertInclude,
-  assertLeft,
-  assertNone,
-  assertRight,
-  assertSome,
-  assertTrue,
-  deepStrictEqual,
-  strictEqual
-} from "effect/test/util"
-import { causes, equalCauses, errorCauseFunctions, errors } from "effect/test/utils/cause"
+import * as internal from "../src/internal/cause.js"
+import { causes, equalCauses, errorCauseFunctions, errors } from "./utils/cause.js"
 
 describe("Cause", () => {
   const empty = Cause.empty
@@ -41,7 +41,7 @@ describe("Cause", () => {
 
       // In Node.js environments, ensure the 'inspect' method includes line information
       if (typeof window === "undefined") {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { inspect } = require("node:util")
         assertInclude(inspect(ex), "Cause.test.ts:39") // <= reference to the line above
       }

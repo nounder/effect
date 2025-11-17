@@ -3,7 +3,9 @@
  */
 import * as Headers from "@effect/platform/Headers"
 import * as HttpApp from "@effect/platform/HttpApp"
+import * as HttpLayerRouter from "@effect/platform/HttpLayerRouter"
 import * as HttpRouter from "@effect/platform/HttpRouter"
+import type * as HttpServerError from "@effect/platform/HttpServerError"
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest"
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
 import type * as Socket from "@effect/platform/Socket"
@@ -25,29 +27,31 @@ import * as FiberSet from "effect/FiberSet"
 import { constant, constTrue, constVoid, identity } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Mailbox from "effect/Mailbox"
-import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Option from "effect/Option"
-import { ArrayFormatter, type ParseError } from "effect/ParseResult"
+import { type ParseError, TreeFormatter } from "effect/ParseResult"
 import * as Predicate from "effect/Predicate"
 import * as Runtime from "effect/Runtime"
+import * as RuntimeFlags from "effect/RuntimeFlags"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
+import type * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
+import type * as Types from "effect/Types"
 import { withRun } from "./internal/utils.js"
 import * as Rpc from "./Rpc.js"
 import type * as RpcGroup from "./RpcGroup.js"
-import {
-  constEof,
-  constPong,
-  type FromClient,
-  type FromClientEncoded,
-  type FromServer,
-  type FromServerEncoded,
-  type Request,
-  RequestId,
-  ResponseDefectEncoded
+import type {
+  FromClient,
+  FromClientEncoded,
+  FromServer,
+  FromServerEncoded,
+  Request,
+  RequestEncoded
 } from "./RpcMessage.js"
+import { constEof, constPong, RequestId, ResponseDefectEncoded } from "./RpcMessage.js"
+import type { RpcMiddleware } from "./RpcMiddleware.js"
 import * as RpcSchema from "./RpcSchema.js"
 import * as RpcSerialization from "./RpcSerialization.js"
 import type { InitialMessage } from "./RpcWorker.js"
@@ -72,8 +76,10 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
     readonly disableTracing?: boolean | undefined
     readonly disableSpanPropagation?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
     readonly disableClientAcks?: boolean | undefined
     readonly concurrency?: number | "unbounded" | undefined
+    readonly disableFatalDefects?: boolean | undefined
   }
 ) => Effect.Effect<
   RpcServer<Rpcs>,
@@ -86,8 +92,10 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
     readonly disableTracing?: boolean | undefined
     readonly disableSpanPropagation?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
     readonly disableClientAcks?: boolean | undefined
     readonly concurrency?: number | "unbounded" | undefined
+    readonly disableFatalDefects?: boolean | undefined
   }
 ) {
   const enableTracing = options.disableTracing !== true
@@ -95,6 +103,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
   const supportsAck = options.disableClientAcks !== true
   const spanPrefix = options.spanPrefix ?? "RpcServer"
   const concurrency = options.concurrency ?? "unbounded"
+  const disableFatalDefects = options.disableFatalDefects ?? false
   const context = yield* Effect.context<Rpc.ToHandler<Rpcs> | Scope.Scope>()
   const scope = Context.get(context, Scope.Scope)
   const fiberSet = yield* FiberSet.make()
@@ -103,7 +112,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
   )
   const concurrencySemaphore = concurrency === "unbounded"
     ? undefined
-    : yield* Effect.makeSemaphore(concurrency)
+    : Effect.unsafeMakeSemaphore(concurrency).withPermits(1)
 
   type Client = {
     readonly id: number
@@ -117,7 +126,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
   const shutdownLatch = Effect.unsafeMakeLatch(false)
   yield* Scope.addFinalizer(
     scope,
-    Effect.fiberIdWith((fiberId) => {
+    Effect.suspend(() => {
       isShutdown = true
       for (const client of clients.values()) {
         client.ended = true
@@ -126,7 +135,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
           continue
         }
         for (const fiber of client.fibers.values()) {
-          fiber.unsafeInterruptAsFork(fiberId)
+          fiber.unsafeInterruptAsFork(fiberIdTransientInterrupt)
         }
       }
       if (clients.size === 0) {
@@ -137,11 +146,11 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
   )
 
   const disconnect = (clientId: number) =>
-    Effect.fiberIdWith((fiberId) => {
+    Effect.suspend(() => {
       const client = clients.get(clientId)
       if (!client) return Effect.void
       for (const fiber of client.fibers.values()) {
-        fiber.unsafeInterruptAsFork(fiberId)
+        fiber.unsafeInterruptAsFork(fiberIdTransientInterrupt)
       }
       clients.delete(clientId)
       return Effect.void
@@ -174,7 +183,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
           }
           case "Interrupt": {
             const fiber = client.fibers.get(message.requestId)
-            return fiber ? Fiber.interruptFork(fiber) : options.onFromServer({
+            return fiber ? Fiber.interruptAsFork(fiber, fiberIdClientInterrupt) : options.onFromServer({
               _tag: "Exit",
               clientId,
               requestId: message.requestId,
@@ -212,7 +221,10 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
     request: Request<Rpcs>
   ): Effect.Effect<void> => {
     if (client.fibers.has(request.id)) {
-      return Effect.interrupt
+      return Effect.flatMap(
+        Fiber.await(client.fibers.get(request.id)!),
+        () => handleRequest(requestFiber, client, request)
+      )
     }
     const rpc = group.requests.get(request.tag) as any as Rpc.AnyWithProps
     const entry = context.unsafeMap.get(rpc?.key) as Rpc.Handler<Rpcs["_tag"]>
@@ -230,24 +242,30 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
       return Effect.zipRight(write, endClient(client))
     }
     const isStream = RpcSchema.isStreamSchema(rpc.successSchema)
-    const result = entry.handler(request.payload, request.headers)
+    const result = entry.handler(request.payload, {
+      clientId: client.id,
+      headers: request.headers
+    })
 
     // if the handler requested forking, then we skip the concurrency control
-    const isFork = Rpc.isFork(result)
+    const isWrapper = Rpc.isWrapper(result)
+    const isFork = isWrapper && result.fork
+    const isUninterruptible = isWrapper && result.uninterruptible
     // unwrap the fork data type
-    const streamOrEffect = isFork ? result.value : result
-
+    const streamOrEffect = isWrapper ? result.value : result
+    const handler = applyMiddleware(
+      rpc,
+      context,
+      client.id,
+      request.payload,
+      request.headers,
+      isStream
+        ? streamEffect(client, request, streamOrEffect)
+        : streamOrEffect as Effect.Effect<any>
+    )
     let responded = false
-    let effect = Effect.uninterruptible(Effect.matchCauseEffect(
-      Effect.interruptible(applyMiddleware(
-        rpc,
-        context,
-        request.payload,
-        request.headers,
-        isStream
-          ? streamEffect(client, request, streamOrEffect)
-          : streamOrEffect as Effect.Effect<any>
-      )),
+    let effect = Effect.matchCauseEffect(
+      isUninterruptible ? handler : Effect.interruptible(handler),
       {
         onSuccess: (value) => {
           responded = true
@@ -260,6 +278,9 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
         },
         onFailure: (cause) => {
           responded = true
+          if (!disableFatalDefects && Cause.isDie(cause) && !Cause.isInterrupted(cause)) {
+            return sendDefect(client, Cause.squash(cause))
+          }
           return options.onFromServer({
             _tag: "Exit",
             clientId: client.id,
@@ -268,17 +289,21 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
           })
         }
       }
-    ))
+    )
     if (enableTracing) {
       const parentSpan = requestFiber.currentContext.unsafeMap.get(Tracer.ParentSpan.key) as Tracer.AnySpan | undefined
       effect = Effect.withSpan(effect, `${spanPrefix}.${request.tag}`, {
         captureStackTrace: false,
-        parent: enableSpanPropagation ?
+        attributes: {
+          requestId: String(request.id),
+          ...options.spanAttributes
+        },
+        parent: enableSpanPropagation && request.spanId ?
           {
             _tag: "ExternalSpan",
-            traceId: request.traceId,
+            traceId: request.traceId!,
             spanId: request.spanId,
-            sampled: request.sampled,
+            sampled: request.sampled!,
             context: Context.empty()
           } :
           undefined,
@@ -292,15 +317,14 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
       })
     }
     if (!isFork && concurrencySemaphore) {
-      effect = concurrencySemaphore.withPermits(1)(effect)
+      effect = concurrencySemaphore(effect)
     }
     const runtime = Runtime.make({
       context: Context.merge(entry.context, requestFiber.currentContext),
       fiberRefs: requestFiber.getFiberRefs(),
-      runtimeFlags: Runtime.defaultRuntime.runtimeFlags
+      runtimeFlags: RuntimeFlags.disable(Runtime.defaultRuntime.runtimeFlags, RuntimeFlags.Interruption)
     })
     const fiber = Runtime.runFork(runtime, effect)
-    FiberSet.unsafeAdd(fiberSet, fiber)
     client.fibers.set(request.id, fiber)
     fiber.addObserver((exit) => {
       if (!responded && exit._tag === "Failure") {
@@ -399,6 +423,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
 const applyMiddleware = <A, E, R>(
   rpc: Rpc.AnyWithProps,
   context: Context.Context<never>,
+  clientId: number,
   payload: A,
   headers: Headers.Headers,
   handler: Effect.Effect<A, E, R>
@@ -410,12 +435,16 @@ const applyMiddleware = <A, E, R>(
   const options = {
     rpc,
     payload,
-    headers
+    headers,
+    clientId
   }
 
   for (const tag of rpc.middlewares) {
-    const middleware = Context.unsafeGet(context, tag)
-    if (tag.optional) {
+    if (tag.wrap) {
+      const middleware = Context.unsafeGet(context, tag)
+      handler = middleware({ ...options, next: handler as any })
+    } else if (tag.optional) {
+      const middleware = Context.unsafeGet(context, tag) as RpcMiddleware<any, any>
       const previous = handler
       handler = Effect.matchEffect(middleware(options), {
         onFailure: () => previous,
@@ -424,6 +453,7 @@ const applyMiddleware = <A, E, R>(
           : (_) => previous
       })
     } else {
+      const middleware = Context.unsafeGet(context, tag) as RpcMiddleware<any, any>
       handler = tag.provides !== undefined
         ? Effect.provideServiceEffect(handler, tag.provides as any, middleware(options))
         : Effect.zipRight(middleware(options), handler)
@@ -443,19 +473,23 @@ export const make: <Rpcs extends Rpc.Any>(
     | {
       readonly disableTracing?: boolean | undefined
       readonly spanPrefix?: string | undefined
+      readonly spanAttributes?: Record<string, unknown> | undefined
       readonly concurrency?: number | "unbounded" | undefined
+      readonly disableFatalDefects?: boolean | undefined
     }
     | undefined
 ) => Effect.Effect<
   never,
   never,
-  Protocol | Rpc.ToHandler<Rpcs> | Rpc.Middleware<Rpcs>
+  Protocol | Rpc.ToHandler<Rpcs> | Rpc.Middleware<Rpcs> | Rpc.Context<Rpcs>
 > = Effect.fnUntraced(function*<Rpcs extends Rpc.Any>(
   group: RpcGroup.RpcGroup<Rpcs>,
   options?: {
     readonly disableTracing?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
     readonly concurrency?: number | "unbounded" | undefined
+    readonly disableFatalDefects?: boolean | undefined
   }
 ) {
   const { disconnects, end, run, send, supportsAck, supportsSpanPropagation, supportsTransferables } = yield* Protocol
@@ -478,7 +512,7 @@ export const make: <Rpcs extends Rpc.Any>(
             response.requestId,
             schemas.collector,
             Effect.provide(schemas.encodeChunk(response.values), schemas.context),
-            (values) => ({ _tag: "Chunk", requestId: response.requestId, values })
+            (values) => ({ _tag: "Chunk", requestId: String(response.requestId), values })
           )
         }
         case "Exit": {
@@ -490,7 +524,7 @@ export const make: <Rpcs extends Rpc.Any>(
             response.requestId,
             schemas.collector,
             Effect.provide(schemas.encodeExit(response.exit), schemas.context),
-            (exit) => ({ _tag: "Exit", requestId: response.requestId, exit })
+            (exit) => ({ _tag: "Exit", requestId: String(response.requestId), exit })
           )
         }
         case "Defect": {
@@ -528,13 +562,6 @@ export const make: <Rpcs extends Rpc.Any>(
     if (!schemas) {
       const entry = context.unsafeMap.get(rpc.key) as Rpc.Handler<Rpcs["_tag"]>
       const streamSchemas = RpcSchema.getStreamSchemas(rpc.successSchema.ast)
-      const failures = new Set([rpc.errorSchema])
-      if (Option.isSome(streamSchemas)) {
-        failures.add(streamSchemas.value.failure)
-      }
-      for (const middleware of rpc.middlewares) {
-        failures.add(middleware.failure)
-      }
       schemas = {
         decode: Schema.decodeUnknown(rpc.payloadSchema as any),
         encodeChunk: Schema.encodeUnknown(
@@ -565,10 +592,10 @@ export const make: <Rpcs extends Rpc.Any>(
       Effect.flatMap((a) => send(client.id, onSuccess(a), collector && collector.unsafeClear())),
       Effect.catchAllCause((cause) => {
         client.schemas.delete(requestId)
-        const defect = Cause.squash(Cause.map(cause, ArrayFormatter.formatErrorSync))
+        const defect = Cause.squash(Cause.map(cause, TreeFormatter.formatErrorSync))
         return Effect.zipRight(
-          server.write(client.id, { _tag: "Interrupt", requestId, interruptors: [] }),
-          sendRequestDefect(client, requestId, defect)
+          sendRequestDefect(client, requestId, defect),
+          server.write(client.id, { _tag: "Interrupt", requestId, interruptors: [] })
         )
       })
     )
@@ -577,7 +604,7 @@ export const make: <Rpcs extends Rpc.Any>(
     Effect.catchAllCause(
       send(client.id, {
         _tag: "Exit",
-        requestId,
+        requestId: String(requestId),
         exit: {
           _tag: "Failure",
           cause: {
@@ -632,7 +659,7 @@ export const make: <Rpcs extends Rpc.Any>(
         return Effect.matchEffect(
           Effect.provide(schemas.decode(request.payload), schemas.context),
           {
-            onFailure: (error) => sendRequestDefect(client, requestId, ArrayFormatter.formatErrorSync(error)),
+            onFailure: (error) => sendRequestDefect(client, requestId, TreeFormatter.formatErrorSync(error)),
             onSuccess: (payload) => {
               client.schemas.set(
                 requestId,
@@ -659,21 +686,21 @@ export const make: <Rpcs extends Rpc.Any>(
           (cause) => sendDefect(client, Cause.squash(cause))
         )
       }
-      case "Ack":
-      case "Eof":
+      case "Eof": {
+        return server.write(clientId, request)
+      }
+      case "Ack": {
+        return server.write(clientId, {
+          ...request,
+          requestId: RequestId(request.requestId)
+        })
+      }
       case "Interrupt": {
-        if ("requestId" in request && typeof request.requestId === "string") {
-          ;(request as any).requestId = BigInt(request.requestId)
-        }
-        return server.write(
-          clientId,
-          request._tag === "Interrupt" ?
-            {
-              ...request,
-              interruptors: []
-            } :
-            request
-        )
+        return server.write(clientId, {
+          ...request,
+          requestId: RequestId(request.requestId),
+          interruptors: []
+        })
       }
       default: {
         return sendDefect(client, `Unknown request tag: ${(request as any)._tag}`)
@@ -682,7 +709,8 @@ export const make: <Rpcs extends Rpc.Any>(
   }).pipe(
     Effect.interruptible,
     Effect.tapErrorCause((cause) => Effect.logFatal("BUG: RpcServer protocol crashed", cause)),
-    Effect.onExit((exit) => Scope.close(scope, exit))
+    Effect.onExit((exit) => Scope.close(scope, exit)),
+    Effect.withUnhandledErrorLogLevel(Option.none())
   )
 })
 
@@ -695,15 +723,53 @@ export const layer = <Rpcs extends Rpc.Any>(
   options?: {
     readonly disableTracing?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
     readonly concurrency?: number | "unbounded" | undefined
+    readonly disableFatalDefects?: boolean | undefined
   }
 ): Layer.Layer<
   never,
   never,
   | Protocol
   | Rpc.ToHandler<Rpcs>
+  | Rpc.Context<Rpcs>
   | Rpc.Middleware<Rpcs>
 > => Layer.scopedDiscard(Effect.forkScoped(Effect.interruptible(make(group, options))))
+
+/**
+ * Create a RPC server that registers a HTTP route with a `HttpLayerRouter`.
+ *
+ * It defaults to using websockets for communication, but can be configured to
+ * use HTTP.
+ *
+ * @since 1.0.0
+ * @category protocol
+ */
+export const layerHttpRouter = <Rpcs extends Rpc.Any>(options: {
+  readonly group: RpcGroup.RpcGroup<Rpcs>
+  readonly path: HttpRouter.PathInput
+  readonly protocol?: "http" | "websocket" | undefined
+  readonly disableTracing?: boolean | undefined
+  readonly spanPrefix?: string | undefined
+  readonly spanAttributes?: Record<string, unknown> | undefined
+  readonly concurrency?: number | "unbounded" | undefined
+  readonly disableFatalDefects?: boolean | undefined
+}): Layer.Layer<
+  never,
+  never,
+  | RpcSerialization.RpcSerialization
+  | HttpLayerRouter.HttpRouter
+  | Rpc.ToHandler<Rpcs>
+  | Rpc.Context<Rpcs>
+  | Rpc.Middleware<Rpcs>
+> =>
+  layer(options.group, options).pipe(
+    Layer.provide(
+      options.protocol === "http"
+        ? layerProtocolHttpRouter(options)
+        : layerProtocolWebsocketRouter(options)
+    )
+  )
 
 /**
  * @since 1.0.0
@@ -720,6 +786,7 @@ export class Protocol extends Context.Tag("@effect/rpc/RpcServer/Protocol")<Prot
     transferables?: ReadonlyArray<globalThis.Transferable>
   ) => Effect.Effect<void>
   readonly end: (clientId: number) => Effect.Effect<void>
+  readonly clientIds: Effect.Effect<ReadonlySet<number>>
   readonly initialMessage: Effect.Effect<Option.Option<unknown>>
   readonly supportsAck: boolean
   readonly supportsTransferables: boolean
@@ -738,9 +805,10 @@ export class Protocol extends Context.Tag("@effect/rpc/RpcServer/Protocol")<Prot
 export const makeProtocolSocketServer = Effect.gen(function*() {
   const server = yield* SocketServer.SocketServer
   const { onSocket, protocol } = yield* makeSocketProtocol
-  yield* Effect.forkScoped(Effect.interruptible(
-    server.run(Effect.fnUntraced(onSocket, Effect.scoped))
-  ))
+  yield* server.run(Effect.fnUntraced(onSocket, Effect.scoped)).pipe(
+    Effect.interruptible,
+    Effect.forkScoped
+  )
   return protocol
 })
 
@@ -773,7 +841,7 @@ export const makeProtocolWithHttpAppWebsocket: Effect.Effect<
   const httpApp: HttpApp.Default<never, Scope.Scope> = Effect.gen(function*() {
     const request = yield* HttpServerRequest.HttpServerRequest
     const socket = yield* Effect.orDie(request.upgrade)
-    yield* onSocket(socket)
+    yield* onSocket(socket, Object.entries(request.headers))
     return HttpServerResponse.empty()
   })
 
@@ -805,6 +873,27 @@ export const makeProtocolWebsocket: <I = HttpRouter.Default>(
 })
 
 /**
+ * @since 1.0.0
+ * @category protocol
+ */
+export const makeProtocolWebsocketRouter: (
+  options: {
+    readonly path: HttpRouter.PathInput
+  }
+) => Effect.Effect<
+  Protocol["Type"],
+  never,
+  RpcSerialization.RpcSerialization | HttpLayerRouter.HttpRouter
+> = Effect.fnUntraced(function*(options: {
+  readonly path: HttpRouter.PathInput
+}) {
+  const router = yield* HttpLayerRouter.HttpRouter
+  const { httpApp, protocol } = yield* makeProtocolWithHttpAppWebsocket
+  yield* router.add("GET", options.path, httpApp)
+  return protocol
+})
+
+/**
  * A rpc protocol that uses websockets for communication.
  *
  * @since 1.0.0
@@ -822,6 +911,19 @@ export const layerProtocolWebsocket = <I = HttpRouter.Default>(options: {
 }
 
 /**
+ * A rpc protocol that uses websockets for communication.
+ *
+ * Uses a `HttpLayerRouter` to provide the websocket endpoint.
+ *
+ * @since 1.0.0
+ * @category protocol
+ */
+export const layerProtocolWebsocketRouter = (options: {
+  readonly path: HttpLayerRouter.PathInput
+}): Layer.Layer<Protocol, never, RpcSerialization.RpcSerialization | HttpLayerRouter.HttpRouter> =>
+  Layer.effect(Protocol, makeProtocolWebsocketRouter(options))
+
+/**
  * @since 1.0.0
  * @category protocol
  */
@@ -834,73 +936,84 @@ export const makeProtocolWithHttpApp: Effect.Effect<
   RpcSerialization.RpcSerialization
 > = Effect.gen(function*() {
   const serialization = yield* RpcSerialization.RpcSerialization
-  const isJson = serialization.contentType === "application/json"
+  const includesFraming = serialization.includesFraming
+  const isBinary = !serialization.contentType.includes("json")
 
   const disconnects = yield* Mailbox.make<number>()
   let writeRequest!: (clientId: number, message: FromClientEncoded) => Effect.Effect<void>
 
   let clientId = 0
 
-  const clients = new Map<number, {
+  type Client = {
     readonly write: (bytes: FromServerEncoded) => Effect.Effect<void>
     readonly end: Effect.Effect<void>
-  }>()
+  }
+  const clients = new Map<number, Client>()
+  const clientIds = new Set<number>()
+
+  const encoder = new TextEncoder()
 
   const httpApp: HttpApp.Default<never, Scope.Scope> = Effect.gen(function*() {
     const request = yield* HttpServerRequest.HttpServerRequest
-    const data = yield* Effect.orDie(request.arrayBuffer)
+    const scope = yield* Effect.scope
+    const requestHeaders = Object.entries(request.headers)
+    const data = yield* Effect.orDie<string | Uint8Array<ArrayBuffer>, HttpServerError.HttpServerError, never>(
+      isBinary ? Effect.map(request.arrayBuffer, (ab) => new Uint8Array(ab)) : request.text
+    )
     const id = clientId++
     const mailbox = yield* Mailbox.make<Uint8Array | FromServerEncoded>()
     const parser = serialization.unsafeMake()
-    const encoder = new TextEncoder()
 
     const offer = (data: Uint8Array | string) =>
       typeof data === "string" ? mailbox.offer(encoder.encode(data)) : mailbox.offer(data)
 
-    clients.set(id, {
-      write: (response) => {
+    clientIds.add(id)
+    const client: Client = {
+      write: !includesFraming ? ((response) => mailbox.offer(response)) : (response) => {
         try {
-          if (!serialization.supportsBigInt) {
-            transformBigInt(response)
-          }
-          return isJson ? mailbox.offer(response) : offer(parser.encode(response))
+          const encoded = parser.encode(response)
+          if (encoded === undefined) return Effect.void
+          return offer(encoded)
         } catch (cause) {
-          return isJson
-            ? mailbox.offer(ResponseDefectEncoded(cause))
-            : offer(parser.encode(ResponseDefectEncoded(cause)))
+          return offer(parser.encode(ResponseDefectEncoded(cause))!)
         }
       },
       end: mailbox.end
+    }
+    clients.set(id, client)
+
+    yield* Scope.addFinalizerExit(scope, () => {
+      clientIds.delete(id)
+      clients.delete(id)
+      disconnects.unsafeOffer(id)
+      if (mailbox.unsafeSize()._tag === "None") return Effect.void
+      return Effect.forEach(
+        requestIds,
+        (requestId) => writeRequest(id, { _tag: "Interrupt", requestId: String(requestId) }),
+        { discard: true }
+      )
     })
 
     const requestIds: Array<RequestId> = []
 
     try {
-      const decoded = parser.decode(new Uint8Array(data)) as ReadonlyArray<FromClientEncoded>
+      const decoded = parser.decode(data) as ReadonlyArray<FromClientEncoded>
       for (const message of decoded) {
         if (message._tag === "Request") {
           requestIds.push(RequestId(message.id))
+          ;(message as Types.Mutable<RequestEncoded>).headers = requestHeaders.concat(
+            message.headers
+          )
         }
         yield* writeRequest(id, message)
       }
     } catch (cause) {
-      yield* offer(parser.encode(ResponseDefectEncoded(cause)))
+      yield* client.write(ResponseDefectEncoded(cause))
     }
 
     yield* writeRequest(id, constEof)
 
-    if (isJson) {
-      let done = false
-      yield* Effect.addFinalizer(() => {
-        clients.delete(id)
-        disconnects.unsafeOffer(id)
-        if (done) return Effect.void
-        return Effect.forEach(
-          requestIds,
-          (requestId) => writeRequest(id, { _tag: "Interrupt", requestId }),
-          { discard: true }
-        )
-      })
+    if (!includesFraming) {
       const responses = Arr.empty<FromServerEncoded>()
       while (true) {
         const [items, done] = yield* mailbox.takeAll
@@ -908,30 +1021,32 @@ export const makeProtocolWithHttpApp: Effect.Effect<
         responses.push(...items as any)
         if (done) break
       }
-      done = true
-      return HttpServerResponse.unsafeJson(responses)
+      return HttpServerResponse.text(parser.encode(responses) as string, { contentType: serialization.contentType })
+    }
+
+    const [initialChunk, done] = yield* mailbox.takeAll
+    if (done) {
+      return HttpServerResponse.uint8Array(mergeUint8Arrays(initialChunk as Chunk.Chunk<Uint8Array>), {
+        contentType: serialization.contentType
+      })
     }
 
     return HttpServerResponse.stream(
-      Stream.ensuringWith(Mailbox.toStream(mailbox as Mailbox.ReadonlyMailbox<Uint8Array>), (exit) => {
-        clients.delete(id)
-        disconnects.unsafeOffer(id)
-        if (!Exit.isInterrupted(exit)) return Effect.void
-        return Effect.forEach(
-          requestIds,
-          (requestId) => writeRequest(id, { _tag: "Interrupt", requestId }),
-          { discard: true }
-        )
-      }),
+      Stream.fromChunk(initialChunk as Chunk.Chunk<Uint8Array>).pipe(
+        Stream.concat(Mailbox.toStream(mailbox as Mailbox.ReadonlyMailbox<Uint8Array>))
+      ),
       { contentType: serialization.contentType }
     )
-  }).pipe(Effect.interruptible)
+  }).pipe(
+    Effect.interruptible,
+    Effect.withUnhandledErrorLogLevel(Option.none())
+  )
 
   const protocol = yield* Protocol.make((writeRequest_) => {
     writeRequest = writeRequest_
     return Effect.succeed({
       disconnects,
-      send: (clientId, response) => {
+      send(clientId, response) {
         const client = clients.get(clientId)
         if (!client) return Effect.void
         return client.write(response)
@@ -941,6 +1056,7 @@ export const makeProtocolWithHttpApp: Effect.Effect<
         if (!client) return Effect.void
         return client.end
       },
+      clientIds: Effect.sync(() => clientIds),
       initialMessage: Effect.succeedNone,
       supportsAck: false,
       supportsTransferables: false,
@@ -950,6 +1066,19 @@ export const makeProtocolWithHttpApp: Effect.Effect<
 
   return { protocol, httpApp } as const
 })
+
+const mergeUint8Arrays = (arrays: Chunk.Chunk<Uint8Array>) => {
+  if (arrays.length === 0) return new Uint8Array(0)
+  if (arrays.length === 1) return Chunk.unsafeHead(arrays)
+  const length = Chunk.reduce(arrays, 0, (acc, a) => acc + a.length)
+  const result = new Uint8Array(length)
+  let offset = 0
+  for (const array of arrays) {
+    result.set(array, offset)
+    offset += array.length
+  }
+  return result
+}
 
 /**
  * @since 1.0.0
@@ -970,6 +1099,19 @@ export const makeProtocolHttp = Effect.fnUntraced(function*<I = HttpRouter.Defau
  * @since 1.0.0
  * @category protocol
  */
+export const makeProtocolHttpRouter = Effect.fnUntraced(function*(options: {
+  readonly path: HttpRouter.PathInput
+}) {
+  const router = yield* HttpLayerRouter.HttpRouter
+  const { httpApp, protocol } = yield* makeProtocolWithHttpApp
+  yield* router.add("POST", options.path, httpApp)
+  return protocol
+})
+
+/**
+ * @since 1.0.0
+ * @category protocol
+ */
 export const makeProtocolWorkerRunner: Effect.Effect<
   Protocol["Type"],
   WorkerError,
@@ -980,6 +1122,8 @@ export const makeProtocolWorkerRunner: Effect.Effect<
   const closeLatch = yield* WorkerRunner.CloseLatch
   const backing = yield* runner.start<FromClientEncoded | InitialMessage.Encoded, FromServerEncoded>(closeLatch)
   const initialMessage = yield* Deferred.make<unknown>()
+  const clientIds = new Set<number>()
+  const disconnects = yield* Mailbox.make<number>()
 
   yield* Deferred.await(closeLatch).pipe(
     Effect.onExit(() => {
@@ -990,18 +1134,30 @@ export const makeProtocolWorkerRunner: Effect.Effect<
   )
 
   yield* backing.run((clientId, message) => {
+    clientIds.add(clientId)
     if (message._tag === "InitialMessage") {
       return Deferred.succeed(initialMessage, message.value)
     }
     return writeRequest(clientId, message)
-  })
+  }).pipe(
+    Effect.withUnhandledErrorLogLevel(Option.none())
+  )
+
+  yield* disconnects.take.pipe(
+    Effect.tap((clientId) => {
+      clientIds.delete(clientId)
+      return disconnects.offer(clientId)
+    }),
+    Effect.forkScoped
+  )
 
   return {
-    disconnects: backing.disconnects ?? (yield* Mailbox.make<number>()),
+    disconnects,
     send: backing.send,
     end(_clientId) {
       return Effect.void
     },
+    clientIds: Effect.sync(() => clientIds),
     initialMessage: Effect.asSome(Deferred.await(initialMessage)),
     supportsAck: true,
     supportsTransferables: true,
@@ -1037,6 +1193,19 @@ export const layerProtocolHttp = <I = HttpRouter.Default>(options: {
 }
 
 /**
+ * A rpc protocol that uses streaming http for communication.
+ *
+ * Uses a `HttpLayerRouter` to provide the http endpoint.
+ *
+ * @since 1.0.0
+ * @category protocol
+ */
+export const layerProtocolHttpRouter = (options: {
+  readonly path: HttpRouter.PathInput
+}): Layer.Layer<Protocol, never, RpcSerialization.RpcSerialization | HttpLayerRouter.HttpRouter> =>
+  Layer.effect(Protocol, makeProtocolHttpRouter(options))
+
+/**
  * @since 1.0.0
  * @category http app
  */
@@ -1045,6 +1214,8 @@ export const toHttpApp: <Rpcs extends Rpc.Any>(
   options?: {
     readonly disableTracing?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
+    readonly disableFatalDefects?: boolean | undefined
   } | undefined
 ) => Effect.Effect<
   HttpApp.Default<never, Scope.Scope>,
@@ -1052,12 +1223,15 @@ export const toHttpApp: <Rpcs extends Rpc.Any>(
   | Scope.Scope
   | RpcSerialization.RpcSerialization
   | Rpc.ToHandler<Rpcs>
+  | Rpc.Context<Rpcs>
   | Rpc.Middleware<Rpcs>
 > = Effect.fnUntraced(function*<Rpcs extends Rpc.Any>(
   group: RpcGroup.RpcGroup<Rpcs>,
   options?: {
     readonly disableTracing?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
+    readonly disableFatalDefects?: boolean | undefined
   }
 ) {
   const { httpApp, protocol } = yield* makeProtocolWithHttpApp
@@ -1078,6 +1252,8 @@ export const toHttpAppWebsocket: <Rpcs extends Rpc.Any>(
   options?: {
     readonly disableTracing?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
+    readonly disableFatalDefects?: boolean | undefined
   } | undefined
 ) => Effect.Effect<
   HttpApp.Default<never, Scope.Scope>,
@@ -1085,12 +1261,15 @@ export const toHttpAppWebsocket: <Rpcs extends Rpc.Any>(
   | Scope.Scope
   | RpcSerialization.RpcSerialization
   | Rpc.ToHandler<Rpcs>
+  | Rpc.Context<Rpcs>
   | Rpc.Middleware<Rpcs>
 > = Effect.fnUntraced(function*<Rpcs extends Rpc.Any>(
   group: RpcGroup.RpcGroup<Rpcs>,
   options?: {
     readonly disableTracing?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
+    readonly disableFatalDefects?: boolean | undefined
   }
 ) {
   const { httpApp, protocol } = yield* makeProtocolWithHttpAppWebsocket
@@ -1120,6 +1299,8 @@ export const toWebHandler = <Rpcs extends Rpc.Any, LE>(
     >
     readonly disableTracing?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
+    readonly disableFatalDefects?: boolean | undefined
     readonly middleware?: (
       httpApp: HttpApp.Default
     ) => HttpApp.Default<
@@ -1131,26 +1312,105 @@ export const toWebHandler = <Rpcs extends Rpc.Any, LE>(
 ): {
   readonly handler: (request: globalThis.Request, context?: Context.Context<never> | undefined) => Promise<Response>
   readonly dispose: () => Promise<void>
-} => {
-  const runtime = ManagedRuntime.make(Layer.mergeAll(options.layer, Layer.scope), options?.memoMap)
-  let handlerCached:
-    | ((request: globalThis.Request, context?: Context.Context<never> | undefined) => Promise<Response>)
-    | undefined
-  const handlerPromise = Effect.gen(function*() {
-    const app = yield* toHttpApp(group, options)
-    const rt = yield* runtime.runtimeEffect
-    const handler = HttpApp.toWebHandlerRuntime(rt)(options?.middleware ? options.middleware(app as any) as any : app)
-    handlerCached = handler
-    return handler
-  }).pipe(runtime.runPromise)
-  function handler(request: globalThis.Request, context?: Context.Context<never> | undefined): Promise<Response> {
-    if (handlerCached !== undefined) {
-      return handlerCached(request, context)
+} =>
+  HttpApp.toWebHandlerLayerWith(Layer.mergeAll(options.layer, Layer.scope), {
+    memoMap: options?.memoMap,
+    middleware: options?.middleware as any,
+    toHandler: (r) => Effect.provide(toHttpApp(group, options), r)
+  })
+
+/**
+ * Create a protocol that uses the provided `Stream` and `Sink` for communication.
+ *
+ * @since 1.0.0
+ * @category protocol
+ */
+export const makeProtocolStdio = Effect.fnUntraced(function*<EIn, EOut, RIn, ROut>(options: {
+  readonly stdin: Stream.Stream<Uint8Array, EIn, RIn>
+  readonly stdout: Sink.Sink<void, Uint8Array | string, unknown, EOut, ROut>
+}) {
+  const fiber = Option.getOrThrow(Fiber.getCurrentFiber())
+  const serialization = yield* RpcSerialization.RpcSerialization
+
+  return yield* Protocol.make(Effect.fnUntraced(function*(writeRequest) {
+    const mailbox = yield* Mailbox.make<Uint8Array | string>()
+    const parser = serialization.unsafeMake()
+
+    yield* options.stdin.pipe(
+      Stream.runForEach((data) => {
+        const decoded = parser.decode(data) as ReadonlyArray<FromClientEncoded>
+        if (decoded.length === 0) return Effect.void
+        let i = 0
+        return Effect.whileLoop({
+          while: () => i < decoded.length,
+          body: () => writeRequest(0, decoded[i++]),
+          step: constVoid
+        })
+      }),
+      Effect.sandbox,
+      Effect.tapError(Effect.logError),
+      Effect.retry(Schedule.spaced(500)),
+      Effect.ensuring(Fiber.interruptFork(fiber)),
+      Effect.forkScoped,
+      Effect.interruptible,
+      Effect.withUnhandledErrorLogLevel(Option.none())
+    )
+
+    yield* Mailbox.toStream(mailbox).pipe(
+      Stream.run(options.stdout),
+      Effect.retry(Schedule.spaced(500)),
+      Effect.forkScoped,
+      Effect.interruptible
+    )
+
+    return {
+      disconnects: yield* Mailbox.make<number>(),
+      send(_clientId, response) {
+        const responseEncoded = parser.encode(response)
+        if (responseEncoded === undefined) {
+          return Effect.void
+        }
+        return mailbox.offer(responseEncoded)
+      },
+      end(_clientId) {
+        return mailbox.end
+      },
+      clientIds: Effect.succeed(new Set([0])),
+      initialMessage: Effect.succeedNone,
+      supportsAck: true,
+      supportsTransferables: false,
+      supportsSpanPropagation: true
     }
-    return handlerPromise.then((handler) => handler(request, context))
-  }
-  return { handler, dispose: runtime.dispose } as const
-}
+  }))
+})
+
+/**
+ * Create a protocol that uses the provided `Stream` and `Sink` for communication.
+ *
+ * @since 1.0.0
+ * @category protocol
+ */
+export const layerProtocolStdio = <EIn, EOut, RIn, ROut>(options: {
+  readonly stdin: Stream.Stream<Uint8Array, EIn, RIn>
+  readonly stdout: Sink.Sink<void, Uint8Array | string, unknown, EOut, ROut>
+}): Layer.Layer<Protocol, never, RpcSerialization.RpcSerialization | RIn | ROut> =>
+  Layer.scoped(Protocol, makeProtocolStdio(options))
+
+/**
+ * Fiber id used for client interruptions.
+ *
+ * @since 1.0.0
+ * @category Interruption
+ */
+export const fiberIdClientInterrupt = FiberId.make(-499, 0) as FiberId.Runtime
+
+/**
+ * Fiber id used for transient interruptions.
+ *
+ * @since 1.0.0
+ * @category Interruption
+ */
+export const fiberIdTransientInterrupt = FiberId.make(-503, 0) as FiberId.Runtime
 
 // internal
 
@@ -1162,14 +1422,16 @@ const makeSocketProtocol = Effect.gen(function*() {
   const clients = new Map<number, {
     readonly write: (bytes: FromServerEncoded) => Effect.Effect<void>
   }>()
+  const clientIds = new Set<number>()
 
   let writeRequest!: (clientId: number, message: FromClientEncoded) => Effect.Effect<void>
 
-  const onSocket = function*(socket: Socket.Socket) {
+  const onSocket = function*(socket: Socket.Socket, headers?: ReadonlyArray<[string, string]>) {
     const scope = yield* Effect.scope
     const parser = serialization.unsafeMake()
     const id = clientId++
     yield* Scope.addFinalizerExit(scope, () => {
+      clientIds.delete(id)
       clients.delete(id)
       return disconnects.offer(id)
     })
@@ -1177,32 +1439,45 @@ const makeSocketProtocol = Effect.gen(function*() {
     const writeRaw = yield* socket.writer
     const write = (response: FromServerEncoded) => {
       try {
-        if (!serialization.supportsBigInt) {
-          transformBigInt(response)
+        const encoded = parser.encode(response)
+        if (encoded === undefined) {
+          return Effect.void
         }
-        return Effect.orDie(writeRaw(parser.encode(response)))
+        return Effect.orDie(writeRaw(encoded))
       } catch (cause) {
         return Effect.orDie(
-          writeRaw(parser.encode(ResponseDefectEncoded(cause)))
+          writeRaw(parser.encode(ResponseDefectEncoded(cause))!)
         )
       }
     }
+    clientIds.add(id)
     clients.set(id, { write })
 
-    yield* Effect.orDie(Effect.interruptible(socket.runRaw((data) => {
+    yield* socket.runRaw((data) => {
       try {
         const decoded = parser.decode(data) as ReadonlyArray<FromClientEncoded>
         if (decoded.length === 0) return Effect.void
         let i = 0
         return Effect.whileLoop({
           while: () => i < decoded.length,
-          body: () => writeRequest(id, decoded[i++]),
+          body() {
+            const message = decoded[i++]
+            if (message._tag === "Request" && headers) {
+              ;(message as Types.Mutable<RequestEncoded>).headers = headers.concat(message.headers)
+            }
+            return writeRequest(id, message)
+          },
           step: constVoid
         })
       } catch (cause) {
-        return writeRaw(parser.encode(ResponseDefectEncoded(cause)))
+        return writeRaw(parser.encode(ResponseDefectEncoded(cause))!)
       }
-    })))
+    }).pipe(
+      Effect.interruptible,
+      Effect.catchIf((error) => error.reason === "Close", () => Effect.void),
+      Effect.orDie,
+      Effect.withUnhandledErrorLogLevel(Option.none())
+    )
   }
 
   const protocol = yield* Protocol.make((writeRequest_) => {
@@ -1217,6 +1492,7 @@ const makeSocketProtocol = Effect.gen(function*() {
       end(_clientId) {
         return Effect.void
       },
+      clientIds: Effect.sync(() => clientIds),
       initialMessage: Effect.succeedNone,
       supportsAck: true,
       supportsTransferables: false,
@@ -1226,9 +1502,3 @@ const makeSocketProtocol = Effect.gen(function*() {
 
   return { protocol, onSocket } as const
 })
-
-const transformBigInt = (response: FromServerEncoded) => {
-  if ("requestId" in response) {
-    ;(response as any).requestId = response.requestId.toString()
-  }
-}

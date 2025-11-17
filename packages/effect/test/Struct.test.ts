@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Number, pipe, String, Struct } from "effect"
-import { deepStrictEqual, strictEqual } from "effect/test/util"
 
 describe("Struct", () => {
   it("pick", () => {
@@ -42,7 +42,7 @@ describe("Struct", () => {
 
   it("omit", () => {
     deepStrictEqual(pipe({ a: "a", b: 1, c: true }, Struct.omit("c")), { a: "a", b: 1 })
-    deepStrictEqual(pipe(Struct.omit({ a: "a", b: 1, c: true }, "c")), { a: "a", b: 1 })
+    deepStrictEqual(Struct.omit({ a: "a", b: 1, c: true }, "c"), { a: "a", b: 1 })
 
     const record1: Record<string, number> = {}
     deepStrictEqual(pipe(record1, Struct.omit("a", "c")), {})
@@ -119,5 +119,11 @@ describe("Struct", () => {
   it("get", () => {
     strictEqual(pipe({ a: 1 }, Struct.get("a")), 1)
     strictEqual(pipe({}, Struct.get("a")), undefined)
+  })
+
+  it("entries", () => {
+    const c = Symbol("c")
+    // should not include symbol keys
+    deepStrictEqual(Struct.entries({ a: "a", b: 1, [c]: 2 }), [["a", "a"], ["b", 1]])
   })
 })

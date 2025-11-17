@@ -1,39 +1,39 @@
-import * as internal from "@effect/opentelemetry/internal/metrics"
 import { assert, describe, it } from "@effect/vitest"
 import { ValueType } from "@opentelemetry/api"
-import { Resource } from "@opentelemetry/resources"
+import { resourceFromAttributes } from "@opentelemetry/resources"
 import * as Effect from "effect/Effect"
 import * as Metric from "effect/Metric"
+import * as internal from "../src/internal/metrics.js"
 
 const findMetric = (metrics: any, name: string) =>
   metrics.resourceMetrics.scopeMetrics[0].metrics.find((_: any) => _.descriptor.name === name)
 
 describe("Metrics", () => {
   it.effect("gauge", () =>
-    Effect.gen(function*(_) {
-      const producer = new internal.MetricProducerImpl(
-        new Resource({
-          name: "test",
-          version: "1.0.0"
-        })
-      )
+    Effect.gen(function*() {
+      const resource = resourceFromAttributes({
+        name: "test",
+        version: "1.0.0"
+      })
+      const producer = new internal.MetricProducerImpl(resource)
       const gauge = Metric.gauge("rps")
 
-      yield* _(Metric.set(gauge, 10), Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
-      yield* _(Metric.set(gauge, 10), Effect.tagMetrics("key", "value"))
-      yield* _(Metric.set(gauge, 20), Effect.tagMetrics("key", "value"))
+      yield* Metric.set(gauge, 10).pipe(Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
+      yield* Metric.set(gauge, 10).pipe(Effect.tagMetrics("key", "value"))
+      yield* Metric.set(gauge, 20).pipe(Effect.tagMetrics("key", "value"))
 
-      const results = yield* _(Effect.promise(() => producer.collect()))
+      const results = yield* Effect.promise(() => producer.collect())
       const object = JSON.parse(JSON.stringify(results))
-      assert.deepEqual(object.resourceMetrics.resource._attributes, {
-        "name": "test",
-        "version": "1.0.0"
-      })
+      assert.deepEqual(object.resourceMetrics.resource._rawAttributes, [
+        ["name", "test"],
+        ["version", "1.0.0"]
+      ])
       assert.equal(object.resourceMetrics.scopeMetrics.length, 1)
       const metric = findMetric(object, "rps")
       assert.deepEqual(metric, {
         "dataPointType": 2,
         "descriptor": {
+          "advice": {},
           "name": "rps",
           "description": "",
           "unit": "requests",
@@ -64,30 +64,31 @@ describe("Metrics", () => {
     }))
 
   it.effect("gauge bigint", () =>
-    Effect.gen(function*(_) {
+    Effect.gen(function*() {
       const producer = new internal.MetricProducerImpl(
-        new Resource({
+        resourceFromAttributes({
           name: "test",
           version: "1.0.0"
         })
       )
       const gauge = Metric.gauge("rps-bigint", { bigint: true })
 
-      yield* _(Metric.set(gauge, 10n), Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
-      yield* _(Metric.set(gauge, 10n), Effect.tagMetrics("key", "value"))
-      yield* _(Metric.set(gauge, 20n), Effect.tagMetrics("key", "value"))
+      yield* Metric.set(gauge, 10n).pipe(Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
+      yield* Metric.set(gauge, 10n).pipe(Effect.tagMetrics("key", "value"))
+      yield* Metric.set(gauge, 20n).pipe(Effect.tagMetrics("key", "value"))
 
-      const results = yield* _(Effect.promise(() => producer.collect()))
+      const results = yield* Effect.promise(() => producer.collect())
       const object = JSON.parse(JSON.stringify(results))
-      assert.deepEqual(object.resourceMetrics.resource._attributes, {
-        "name": "test",
-        "version": "1.0.0"
-      })
+      assert.deepEqual(object.resourceMetrics.resource._rawAttributes, [
+        ["name", "test"],
+        ["version", "1.0.0"]
+      ])
       assert.equal(object.resourceMetrics.scopeMetrics.length, 1)
       const metric = findMetric(object, "rps-bigint")
       assert.deepEqual(metric, {
         "dataPointType": 2,
         "descriptor": {
+          "advice": {},
           "name": "rps-bigint",
           "description": "",
           "unit": "requests",
@@ -118,30 +119,31 @@ describe("Metrics", () => {
     }))
 
   it.effect("counter", () =>
-    Effect.gen(function*(_) {
+    Effect.gen(function*() {
       const producer = new internal.MetricProducerImpl(
-        new Resource({
+        resourceFromAttributes({
           name: "test",
           version: "1.0.0"
         })
       )
       const counter = Metric.counter("counter", { description: "Example" })
 
-      yield* _(Metric.increment(counter), Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
-      yield* _(Metric.increment(counter), Effect.tagMetrics("key", "value"))
-      yield* _(Metric.increment(counter), Effect.tagMetrics("key", "value"))
+      yield* Metric.increment(counter).pipe(Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
+      yield* Metric.increment(counter).pipe(Effect.tagMetrics("key", "value"))
+      yield* Metric.increment(counter).pipe(Effect.tagMetrics("key", "value"))
 
-      const results = yield* _(Effect.promise(() => producer.collect()))
+      const results = yield* Effect.promise(() => producer.collect())
       const object = JSON.parse(JSON.stringify(results))
-      assert.deepEqual(object.resourceMetrics.resource._attributes, {
-        "name": "test",
-        "version": "1.0.0"
-      })
+      assert.deepEqual(object.resourceMetrics.resource._rawAttributes, [
+        ["name", "test"],
+        ["version", "1.0.0"]
+      ])
       assert.equal(object.resourceMetrics.scopeMetrics.length, 1)
       const metric = findMetric(object, "counter")
       assert.deepEqual(metric, {
         "dataPointType": 3,
         "descriptor": {
+          "advice": {},
           "name": "counter",
           "description": "Example",
           "unit": "requests",
@@ -173,9 +175,9 @@ describe("Metrics", () => {
     }))
 
   it.effect("counter-inc", () =>
-    Effect.gen(function*(_) {
+    Effect.gen(function*() {
       const producer = new internal.MetricProducerImpl(
-        new Resource({
+        resourceFromAttributes({
           name: "test",
           version: "1.0.0"
         })
@@ -185,21 +187,22 @@ describe("Metrics", () => {
         incremental: true
       })
 
-      yield* _(Metric.increment(counter), Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
-      yield* _(Metric.increment(counter), Effect.tagMetrics("key", "value"))
-      yield* _(Metric.increment(counter), Effect.tagMetrics("key", "value"))
+      yield* Metric.increment(counter).pipe(Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
+      yield* Metric.increment(counter).pipe(Effect.tagMetrics("key", "value"))
+      yield* Metric.increment(counter).pipe(Effect.tagMetrics("key", "value"))
 
-      const results = yield* _(Effect.promise(() => producer.collect()))
+      const results = yield* Effect.promise(() => producer.collect())
       const object = JSON.parse(JSON.stringify(results))
-      assert.deepEqual(object.resourceMetrics.resource._attributes, {
-        "name": "test",
-        "version": "1.0.0"
-      })
+      assert.deepEqual(object.resourceMetrics.resource._rawAttributes, [
+        ["name", "test"],
+        ["version", "1.0.0"]
+      ])
       assert.equal(object.resourceMetrics.scopeMetrics.length, 1)
       const metric = findMetric(object, "counter-inc")
       assert.deepEqual(metric, {
         "dataPointType": 3,
         "descriptor": {
+          "advice": {},
           "name": "counter-inc",
           "description": "Example",
           "unit": "requests",
@@ -231,9 +234,9 @@ describe("Metrics", () => {
     }))
 
   it.effect("counter-bigint", () =>
-    Effect.gen(function*(_) {
+    Effect.gen(function*() {
       const producer = new internal.MetricProducerImpl(
-        new Resource({
+        resourceFromAttributes({
           name: "test",
           version: "1.0.0"
         })
@@ -244,21 +247,22 @@ describe("Metrics", () => {
         bigint: true
       })
 
-      yield* _(Metric.increment(counter), Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
-      yield* _(Metric.increment(counter), Effect.tagMetrics("key", "value"))
-      yield* _(Metric.increment(counter), Effect.tagMetrics("key", "value"))
+      yield* Metric.increment(counter).pipe(Effect.tagMetrics("key", "value"), Effect.tagMetrics("unit", "requests"))
+      yield* Metric.increment(counter).pipe(Effect.tagMetrics("key", "value"))
+      yield* Metric.increment(counter).pipe(Effect.tagMetrics("key", "value"))
 
-      const results = yield* _(Effect.promise(() => producer.collect()))
+      const results = yield* Effect.promise(() => producer.collect())
       const object = JSON.parse(JSON.stringify(results))
-      assert.deepEqual(object.resourceMetrics.resource._attributes, {
-        "name": "test",
-        "version": "1.0.0"
-      })
+      assert.deepEqual(object.resourceMetrics.resource._rawAttributes, [
+        ["name", "test"],
+        ["version", "1.0.0"]
+      ])
       assert.equal(object.resourceMetrics.scopeMetrics.length, 1)
       const metric = findMetric(object, "counter-bigint")
       assert.deepEqual(metric, {
         "dataPointType": 3,
         "descriptor": {
+          "advice": {},
           "name": "counter-bigint",
           "description": "Example",
           "unit": "requests",

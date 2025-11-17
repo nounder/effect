@@ -7,6 +7,7 @@ import type { Branded } from "effect/Brand"
 import type * as FiberId from "effect/FiberId"
 import * as Schema from "effect/Schema"
 import type * as Rpc from "./Rpc.js"
+import type { RpcClientError } from "./RpcClientError.js"
 
 /**
  * @since 1.0.0
@@ -18,7 +19,7 @@ export type FromClient<A extends Rpc.Any> = Request<A> | Ack | Interrupt | Eof
  * @since 1.0.0
  * @category request
  */
-export type FromClientEncoded = RequestEncoded | Ack | InterruptEncoded | Ping | Eof
+export type FromClientEncoded = RequestEncoded | AckEncoded | InterruptEncoded | Ping | Eof
 
 /**
  * @since 1.0.0
@@ -51,13 +52,13 @@ export const RequestId = (id: bigint | string): RequestId =>
  */
 export interface RequestEncoded {
   readonly _tag: "Request"
-  readonly id: bigint | string
+  readonly id: string
   readonly tag: string
   readonly payload: unknown
-  readonly traceId: string
-  readonly spanId: string
-  readonly sampled: boolean
   readonly headers: ReadonlyArray<[string, string]>
+  readonly traceId?: string | undefined
+  readonly spanId?: string | undefined
+  readonly sampled?: boolean | undefined
 }
 
 /**
@@ -69,10 +70,10 @@ export interface Request<A extends Rpc.Any> {
   readonly id: RequestId
   readonly tag: Rpc.Tag<A>
   readonly payload: Rpc.Payload<A>
-  readonly traceId: string
-  readonly spanId: string
-  readonly sampled: boolean
   readonly headers: Headers
+  readonly traceId?: string | undefined
+  readonly spanId?: string | undefined
+  readonly sampled?: boolean | undefined
 }
 
 /**
@@ -98,9 +99,18 @@ export interface Interrupt {
  * @since 1.0.0
  * @category request
  */
+export interface AckEncoded {
+  readonly _tag: "Ack"
+  readonly requestId: string
+}
+
+/**
+ * @since 1.0.0
+ * @category request
+ */
 export interface InterruptEncoded {
   readonly _tag: "Interrupt"
-  readonly requestId: RequestId
+  readonly requestId: string
 }
 
 /**
@@ -145,7 +155,12 @@ export type FromServer<A extends Rpc.Any> =
  * @since 1.0.0
  * @category response
  */
-export type FromServerEncoded = ResponseChunkEncoded | ResponseExitEncoded | ResponseDefectEncoded | Pong
+export type FromServerEncoded =
+  | ResponseChunkEncoded
+  | ResponseExitEncoded
+  | ResponseDefectEncoded
+  | Pong
+  | ClientProtocolError
 
 /**
  * @since 1.0.0
@@ -171,7 +186,7 @@ export type ResponseId = Branded<number, ResponseIdTypeId>
  */
 export interface ResponseChunkEncoded {
   readonly _tag: "Chunk"
-  readonly requestId: bigint | string
+  readonly requestId: string
   readonly values: NonEmptyReadonlyArray<unknown>
 }
 
@@ -192,8 +207,17 @@ export interface ResponseChunk<A extends Rpc.Any> {
  */
 export interface ResponseExitEncoded {
   readonly _tag: "Exit"
-  readonly requestId: bigint | string
+  readonly requestId: string
   readonly exit: Schema.ExitEncoded<unknown, unknown, unknown>
+}
+
+/**
+ * @since 1.0.0
+ * @category response
+ */
+export interface ClientProtocolError {
+  readonly _tag: "ClientProtocolError"
+  readonly error: RpcClientError
 }
 
 /**

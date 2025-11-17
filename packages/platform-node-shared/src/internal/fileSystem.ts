@@ -13,11 +13,11 @@ import * as OS from "node:os"
 import * as Path from "node:path"
 import { handleErrnoException } from "./error.js"
 
-const handleBadArgument = (method: string) => (err: unknown) =>
-  Error.BadArgument({
+const handleBadArgument = (method: string) => (cause: unknown) =>
+  new Error.BadArgument({
     module: "FileSystem",
     method,
-    message: (err as Error).message ?? String(err)
+    cause
   })
 
 // == access
@@ -345,13 +345,15 @@ const makeFile = (() => {
         ),
         (bytesWritten) => {
           if (bytesWritten === 0) {
-            return Effect.fail(Error.SystemError({
-              module: "FileSystem",
-              method: "writeAll",
-              reason: "WriteZero",
-              pathOrDescriptor: this.fd,
-              message: "write returned 0 bytes written"
-            }))
+            return Effect.fail(
+              new Error.SystemError({
+                module: "FileSystem",
+                method: "writeAll",
+                reason: "WriteZero",
+                pathOrDescriptor: this.fd,
+                description: "write returned 0 bytes written"
+              })
+            )
           }
 
           if (!this.append) {
@@ -380,7 +382,7 @@ const makeTempFileFactory = (method: string) => {
   return (options?: FileSystem.MakeTempFileOptions) =>
     pipe(
       Effect.zip(makeDirectory(options), randomHexString(6)),
-      Effect.map(([directory, random]) => Path.join(directory, random)),
+      Effect.map(([directory, random]) => Path.join(directory, random + (options?.suffix ?? ""))),
       Effect.tap((path) => Effect.scoped(open(path, { flag: "w+" })))
     )
 }
@@ -485,7 +487,7 @@ const makeFileInfo = (stat: NFS.Stats): FileSystem.File.Info => ({
   uid: Option.fromNullable(stat.uid),
   gid: Option.fromNullable(stat.gid),
   size: FileSystem.Size(stat.size),
-  blksize: Option.fromNullable(FileSystem.Size(stat.blksize)),
+  blksize: Option.map(Option.fromNullable(stat.blksize), FileSystem.Size),
   blocks: Option.fromNullable(stat.blocks)
 })
 const stat = (() => {
@@ -533,17 +535,20 @@ const utimes = (() => {
 
 // == watch
 
-const watchNode = (path: string) =>
+const watchNode = (path: string, options?: FileSystem.WatchOptions) =>
   Stream.asyncScoped<FileSystem.WatchEvent, Error.PlatformError>((emit) =>
     Effect.acquireRelease(
       Effect.sync(() => {
-        const watcher = NFS.watch(path, {}, (event, path) => {
+        const watcher = NFS.watch(path, { recursive: options?.recursive }, (event, path) => {
           if (!path) return
           switch (event) {
             case "rename": {
-              emit.fromEffect(Effect.match(stat(path), {
-                onSuccess: (_) => FileSystem.WatchEventCreate({ path }),
-                onFailure: (_) => FileSystem.WatchEventRemove({ path })
+              emit.fromEffect(Effect.matchEffect(stat(path), {
+                onSuccess: (_) => Effect.succeed(FileSystem.WatchEventCreate({ path })),
+                onFailure: (err) =>
+                  err._tag === "SystemError" && err.reason === "NotFound"
+                    ? Effect.succeed(FileSystem.WatchEventRemove({ path }))
+                    : Effect.fail(err)
               }))
               return
             }
@@ -554,13 +559,15 @@ const watchNode = (path: string) =>
           }
         })
         watcher.on("error", (error) => {
-          emit.fail(Error.SystemError({
-            module: "FileSystem",
-            reason: "Unknown",
-            method: "watch",
-            pathOrDescriptor: path,
-            message: error.message
-          }))
+          emit.fail(
+            new Error.SystemError({
+              module: "FileSystem",
+              reason: "Unknown",
+              method: "watch",
+              pathOrDescriptor: path,
+              cause: error
+            })
+          )
         })
         watcher.on("close", () => {
           emit.end()
@@ -571,12 +578,16 @@ const watchNode = (path: string) =>
     )
   )
 
-const watch = (backend: Option.Option<Context.Tag.Service<FileSystem.WatchBackend>>, path: string) =>
+const watch = (
+  backend: Option.Option<Context.Tag.Service<FileSystem.WatchBackend>>,
+  path: string,
+  options?: FileSystem.WatchOptions
+) =>
   stat(path).pipe(
     Effect.map((stat) =>
       backend.pipe(
-        Option.flatMap((_) => _.register(path, stat)),
-        Option.getOrElse(() => watchNode(path))
+        Option.flatMap((_) => _.register(path, stat, options)),
+        Option.getOrElse(() => watchNode(path, options))
       )
     ),
     Stream.unwrap
@@ -627,8 +638,8 @@ const makeFileSystem = Effect.map(Effect.serviceOption(FileSystem.WatchBackend),
     symlink,
     truncate,
     utimes,
-    watch(path) {
-      return watch(backend, path)
+    watch(path, options) {
+      return watch(backend, path, options)
     },
     writeFile
   }))

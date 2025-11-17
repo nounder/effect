@@ -45,35 +45,35 @@ describe("Schema Context", () => {
   })
 
   it("declare errors", () => {
-    // @ts-expect-error
-    S.declare(
+    expect(S.declare).type.not.toBeCallableWith(
       [aContext, bContext],
       {
-        decode: (_a, _b) => () => Taga.pipe(Effect.flatMap(ParseResult.succeed)),
-        encode: (_a, _b) => () => ParseResult.succeed(1)
+        decode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () =>
+          Taga.pipe(Effect.flatMap(ParseResult.succeed)),
+        encode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () => ParseResult.succeed(1)
       }
     )
 
-    // @ts-expect-error
-    S.declare(
+    expect(S.declare).type.not.toBeCallableWith(
       [aContext, bContext],
       {
-        decode: (_a, _b) => () => ParseResult.succeed("a"),
-        encode: (_a, _b) => () => Tagb.pipe(Effect.flatMap(ParseResult.succeed))
+        decode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () => ParseResult.succeed("a"),
+        encode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () =>
+          Tagb.pipe(Effect.flatMap(ParseResult.succeed))
       }
     )
 
-    S.declare(
-      // @ts-expect-error
+    expect(S.declare).type.not.toBeCallableWith(
       [aContext, bContext],
       {
-        decode: (_a, _b) => () => Taga.pipe(Effect.flatMap(ParseResult.succeed)),
-        encode: (_a, _b) => () => Tagb.pipe(Effect.flatMap(ParseResult.succeed))
+        decode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () =>
+          Taga.pipe(Effect.flatMap(ParseResult.succeed)),
+        encode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () =>
+          Tagb.pipe(Effect.flatMap(ParseResult.succeed))
       }
     )
 
-    // @ts-expect-error
-    S.declare(
+    expect(S.declare).type.not.toBeCallableWith(
       [],
       {
         decode: () => () => Tag1.pipe(Effect.flatMap(ParseResult.succeed)),
@@ -81,21 +81,21 @@ describe("Schema Context", () => {
       }
     )
 
-    // @ts-expect-error
-    S.declare(
+    expect(S.declare).type.not.toBeCallableWith(
       [aContext, bContext],
       {
-        decode: (_a, _b) => () => Tag1.pipe(Effect.flatMap(ParseResult.succeed)),
-        encode: (_a, _b) => () => ParseResult.succeed(1)
+        decode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () =>
+          Tag1.pipe(Effect.flatMap(ParseResult.succeed)),
+        encode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () => ParseResult.succeed(1)
       }
     )
 
-    // @ts-expect-error
-    S.declare(
+    expect(S.declare).type.not.toBeCallableWith(
       [aContext, bContext],
       {
-        decode: (_a, _b) => () => ParseResult.succeed("a"),
-        encode: (_a, _b) => () => Tag2.pipe(Effect.flatMap(ParseResult.succeed))
+        decode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () => ParseResult.succeed("a"),
+        encode: (_a: S.Schema<string, string>, _b: S.Schema<number, number>) => () =>
+          Tag2.pipe(Effect.flatMap(ParseResult.succeed))
       }
     )
   })
@@ -196,11 +196,6 @@ describe("Schema Context", () => {
       .type.toBe<S.SchemaClass<{ readonly a: string }, { readonly a: string }, "aContext" | "bContext">>()
   })
 
-  it("brand error", () => {
-    // @ts-expect-error
-    aContext.pipe(S.brand("a"))
-  })
-
   it("partialWith", () => {
     expect(S.partialWith(S.Struct({ a: aContext, b: bContext }), { exact: true }))
       .type.toBe<
@@ -297,9 +292,9 @@ describe("Schema Context", () => {
 
   it("attachPropertySignature", () => {
     expect(S.Struct({ a: aContext }).pipe(S.attachPropertySignature("_tag", "A")))
-      .type.toBe<S.SchemaClass<{ readonly a: string; readonly _tag: "A" }, { readonly a: string }, "aContext">>()
+      .type.toBe<S.SchemaClass<{ readonly a: string } & { readonly _tag: "A" }, { readonly a: string }, "aContext">>()
     expect(S.attachPropertySignature(S.Struct({ a: aContext }), "_tag", "A"))
-      .type.toBe<S.SchemaClass<{ readonly a: string; readonly _tag: "A" }, { readonly a: string }, "aContext">>()
+      .type.toBe<S.SchemaClass<{ readonly a: string } & { readonly _tag: "A" }, { readonly a: string }, "aContext">>()
   })
 
   it("annotations", () => {

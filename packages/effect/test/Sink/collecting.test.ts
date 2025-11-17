@@ -1,11 +1,11 @@
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import * as Chunk from "effect/Chunk"
 import * as Effect from "effect/Effect"
 import { constTrue, pipe } from "effect/Function"
 import * as Option from "effect/Option"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
-import { deepStrictEqual, strictEqual } from "effect/test/util"
 
 describe("Sink", () => {
   it.effect("collectAllN - respects the given limit", () =>
@@ -252,7 +252,7 @@ describe("Sink", () => {
           body: (acc, option) => Option.isSome(option) ? pipe(acc, Chunk.append(option.value)) : acc
         })
       )
-      const stream = pipe(Stream.fromChunk(Chunk.range(1, 100)))
+      const stream = Stream.fromChunk(Chunk.range(1, 100))
       const result = yield* pipe(
         stream,
         Stream.concat(stream),

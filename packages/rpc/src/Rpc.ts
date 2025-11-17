@@ -6,12 +6,15 @@ import * as Context_ from "effect/Context"
 import type { Effect } from "effect/Effect"
 import type { Exit as Exit_ } from "effect/Exit"
 import { globalValue } from "effect/GlobalValue"
+import type { ReadonlyMailbox } from "effect/Mailbox"
 import * as Option from "effect/Option"
 import { type Pipeable, pipeArguments } from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
+import * as PrimaryKey from "effect/PrimaryKey"
 import * as Schema from "effect/Schema"
 import type * as AST from "effect/SchemaAST"
 import type { Stream } from "effect/Stream"
+import type { NoInfer } from "effect/Types"
 import type * as RpcMiddleware from "./RpcMiddleware.js"
 import * as RpcSchema from "./RpcSchema.js"
 
@@ -41,12 +44,14 @@ export const isRpc = (u: unknown): u is Rpc<any, any, any> => Predicate.hasPrope
  * @category models
  */
 export interface Rpc<
-  out Tag extends string,
-  out Payload extends AnyStructSchema = Schema.Struct<{}>,
+  in out Tag extends string,
+  out Payload extends AnySchema = typeof Schema.Void,
   out Success extends Schema.Schema.Any = typeof Schema.Void,
   out Error extends Schema.Schema.All = typeof Schema.Never,
   out Middleware extends RpcMiddleware.TagClassAny = never
 > extends Pipeable {
+  new(_: never): {}
+
   readonly [TypeId]: TypeId
   readonly _tag: Tag
   readonly key: string
@@ -103,6 +108,17 @@ export interface Rpc<
   >
 
   /**
+   * Set the schema for the error response of the rpc.
+   */
+  prefix<const Prefix extends string>(prefix: Prefix): Rpc<
+    `${Prefix}${Tag}`,
+    Payload,
+    Success,
+    Error,
+    Middleware
+  >
+
+  /**
    * Add an annotation on the rpc.
    */
   annotate<I, S>(
@@ -127,7 +143,10 @@ export interface Rpc<
 export interface Handler<Tag extends string> {
   readonly _: unique symbol
   readonly tag: Tag
-  readonly handler: (request: any, headers: Headers) => Effect<any, any> | Stream<any, any>
+  readonly handler: (request: any, options: {
+    readonly clientId: number
+    readonly headers: Headers
+  }) => Effect<any, any> | Stream<any, any>
   readonly context: Context<never>
 }
 
@@ -149,7 +168,7 @@ export interface AnyWithProps {
   readonly [TypeId]: TypeId
   readonly _tag: string
   readonly key: string
-  readonly payloadSchema: AnyStructSchema
+  readonly payloadSchema: AnySchema
   readonly successSchema: Schema.Schema.Any
   readonly errorSchema: Schema.Schema.All
   readonly annotations: Context_.Context<never>
@@ -283,9 +302,9 @@ export type PayloadConstructor<R> = R extends Rpc<
   infer _Error,
   infer _Middleware
 > ?
-  Schema.Struct.Constructor<_Payload["fields"]> extends infer T ?
-    [keyof T] extends [never] ? void | {} : Schema.Simplify<T>
-  : never
+  _Payload extends { readonly fields: Schema.Struct.Fields } ?
+    Schema.Simplify<Schema.Struct.Constructor<_Payload["fields"]>>
+  : _Payload["Type"]
   : never
 
 /**
@@ -398,6 +417,18 @@ export type ToHandler<R extends Any> = R extends Rpc<
  * @since 1.0.0
  * @category models
  */
+export type ToHandlerFn<Current extends Any, R = any> = (
+  payload: Payload<Current>,
+  options: {
+    readonly clientId: number
+    readonly headers: Headers
+  }
+) => ResultFrom<Current, R> | Wrapper<ResultFrom<Current, R>>
+
+/**
+ * @since 1.0.0
+ * @category models
+ */
 export type IsStream<R extends Any, Tag extends string> = R extends
   Rpc<Tag, infer _Payload, RpcSchema.Stream<infer _A, infer _E>, infer _Error, infer _Middleware> ? true : never
 
@@ -434,6 +465,53 @@ export type ExcludeProvides<Env, R extends Any, Tag extends string> = Exclude<
  */
 export interface From<S extends AnyTaggedRequestSchema> extends Rpc<S["_tag"], S, S["success"], S["failure"]> {}
 
+/**
+ * @since 1.0.0
+ * @category models
+ */
+export type ResultFrom<R extends Any, Context> = R extends Rpc<
+  infer _Tag,
+  infer _Payload,
+  infer _Success,
+  infer _Error,
+  infer _Middleware
+> ? [_Success] extends [RpcSchema.Stream<infer _SA, infer _SE>] ?
+      | Stream<
+        _SA["Type"],
+        _SE["Type"] | _Error["Type"],
+        Context
+      >
+      | Effect<
+        ReadonlyMailbox<_SA["Type"], _SE["Type"] | _Error["Type"]>,
+        _SE["Type"] | Schema.Schema.Type<_Error>,
+        Context
+      > :
+  Effect<
+    _Success["Type"],
+    _Error["Type"],
+    Context
+  > :
+  never
+
+/**
+ * @since 1.0.0
+ * @category models
+ */
+export type Prefixed<Rpcs extends Any, Prefix extends string> = Rpcs extends Rpc<
+  infer _Tag,
+  infer _Payload,
+  infer _Success,
+  infer _Error,
+  infer _Middleware
+> ? Rpc<
+    `${Prefix}${_Tag}`,
+    _Payload,
+    _Success,
+    _Error,
+    _Middleware
+  >
+  : never
+
 const Proto = {
   [TypeId]: TypeId,
   pipe() {
@@ -444,37 +522,71 @@ const Proto = {
     successSchema: Schema.Schema.Any
   ) {
     return makeProto({
-      ...this,
-      successSchema
+      _tag: this._tag,
+      payloadSchema: this.payloadSchema,
+      successSchema,
+      errorSchema: this.errorSchema,
+      annotations: this.annotations,
+      middlewares: this.middlewares
     })
   },
   setError(this: AnyWithProps, errorSchema: Schema.Schema.All) {
     return makeProto({
-      ...this,
-      errorSchema
+      _tag: this._tag,
+      payloadSchema: this.payloadSchema,
+      successSchema: this.successSchema,
+      errorSchema,
+      annotations: this.annotations,
+      middlewares: this.middlewares
     })
   },
   setPayload(this: AnyWithProps, payloadSchema: Schema.Struct<any> | Schema.Struct.Fields) {
     return makeProto({
-      ...this,
-      payloadSchema: Schema.isSchema(payloadSchema) ? payloadSchema as any : Schema.Struct(payloadSchema as any)
+      _tag: this._tag,
+      payloadSchema: Schema.isSchema(payloadSchema) ? payloadSchema as any : Schema.Struct(payloadSchema as any),
+      successSchema: this.successSchema,
+      errorSchema: this.errorSchema,
+      annotations: this.annotations,
+      middlewares: this.middlewares
     })
   },
   middleware(this: AnyWithProps, middleware: RpcMiddleware.TagClassAny) {
     return makeProto({
-      ...this,
+      _tag: this._tag,
+      payloadSchema: this.payloadSchema,
+      successSchema: this.successSchema,
+      errorSchema: this.errorSchema,
+      annotations: this.annotations,
       middlewares: new Set([...this.middlewares, middleware])
+    })
+  },
+  prefix(this: AnyWithProps, prefix: string) {
+    return makeProto({
+      _tag: `${prefix}${this._tag}`,
+      payloadSchema: this.payloadSchema,
+      successSchema: this.successSchema,
+      errorSchema: this.errorSchema,
+      annotations: this.annotations,
+      middlewares: this.middlewares
     })
   },
   annotate(this: AnyWithProps, tag: Context_.Tag<any, any>, value: any) {
     return makeProto({
-      ...this,
+      _tag: this._tag,
+      payloadSchema: this.payloadSchema,
+      successSchema: this.successSchema,
+      errorSchema: this.errorSchema,
+      middlewares: this.middlewares,
       annotations: Context_.add(this.annotations, tag, value)
     })
   },
   annotateContext(this: AnyWithProps, context: Context_.Context<any>) {
     return makeProto({
-      ...this,
+      _tag: this._tag,
+      payloadSchema: this.payloadSchema,
+      successSchema: this.successSchema,
+      errorSchema: this.errorSchema,
+      middlewares: this.middlewares,
       annotations: Context_.merge(this.annotations, context)
     })
   }
@@ -482,7 +594,7 @@ const Proto = {
 
 const makeProto = <
   const Tag extends string,
-  Payload extends AnyStructSchema,
+  Payload extends Schema.Schema.Any,
   Success extends Schema.Schema.Any,
   Error extends Schema.Schema.All,
   Middleware extends RpcMiddleware.TagClassAny
@@ -494,12 +606,12 @@ const makeProto = <
   readonly annotations: Context_.Context<never>
   readonly middlewares: ReadonlySet<Middleware>
 }): Rpc<Tag, Payload, Success, Error, Middleware> => {
-  const self = Object.assign(Object.create(Proto), options)
-  self.key = `@effect/rpc/Rpc/${options._tag}`
-  return self
+  function Rpc() {}
+  Object.setPrototypeOf(Rpc, Proto)
+  Object.assign(Rpc, options)
+  Rpc.key = `@effect/rpc/Rpc/${options._tag}`
+  return Rpc as any
 }
-
-const constEmptyStruct = Schema.Struct({})
 
 /**
  * @since 1.0.0
@@ -507,7 +619,7 @@ const constEmptyStruct = Schema.Struct({})
  */
 export const make = <
   const Tag extends string,
-  Payload extends AnyStructSchema | Schema.Struct.Fields = Schema.Struct<{}>,
+  Payload extends Schema.Schema.Any | Schema.Struct.Fields = typeof Schema.Void,
   Success extends Schema.Schema.Any = typeof Schema.Void,
   Error extends Schema.Schema.All = typeof Schema.Never,
   const Stream extends boolean = false
@@ -516,6 +628,9 @@ export const make = <
   readonly success?: Success
   readonly error?: Error
   readonly stream?: Stream
+  readonly primaryKey?: [Payload] extends [Schema.Struct.Fields] ?
+    ((payload: Schema.Simplify<Schema.Struct.Type<NoInfer<Payload>>>) => string) :
+    never
 }): Rpc<
   Tag,
   Payload extends Schema.Struct.Fields ? Schema.Struct<Payload> : Payload,
@@ -524,13 +639,23 @@ export const make = <
 > => {
   const successSchema = options?.success ?? Schema.Void
   const errorSchema = options?.error ?? Schema.Never
-  return makeProto({
-    _tag: tag,
-    payloadSchema: Schema.isSchema(options?.payload)
+  let payloadSchema: any
+  if (options?.primaryKey) {
+    payloadSchema = class Payload extends Schema.Class<Payload>(`@effect/rpc/Rpc/${tag}`)(options.payload as any) {
+      [PrimaryKey.symbol](): string {
+        return options.primaryKey!(this as any)
+      }
+    }
+  } else {
+    payloadSchema = Schema.isSchema(options?.payload)
       ? options?.payload as any
       : options?.payload
       ? Schema.Struct(options?.payload as any)
-      : constEmptyStruct,
+      : Schema.Void
+  }
+  return makeProto({
+    _tag: tag,
+    payloadSchema,
     successSchema: options?.stream ?
       RpcSchema.Stream({
         success: successSchema,
@@ -547,14 +672,13 @@ export const make = <
  * @since 1.0.0
  * @category constructors
  */
-export interface AnyStructSchema extends Pipeable {
+export interface AnySchema extends Pipeable {
   readonly [Schema.TypeId]: any
-  readonly make: any
   readonly Type: any
   readonly Encoded: any
   readonly Context: any
+  readonly make?: (params: any, ...rest: ReadonlyArray<any>) => any
   readonly ast: AST.AST
-  readonly fields: Schema.Struct.Fields
   readonly annotations: any
 }
 
@@ -562,7 +686,7 @@ export interface AnyStructSchema extends Pipeable {
  * @since 1.0.0
  * @category constructors
  */
-export interface AnyTaggedRequestSchema extends AnyStructSchema {
+export interface AnyTaggedRequestSchema extends AnySchema {
   readonly _tag: string
   readonly success: Schema.Schema.Any
   readonly failure: Schema.Schema.All
@@ -597,15 +721,17 @@ export const exitSchema = <R extends Any>(
     return exitSchemaCache.get(self) as any
   }
   const rpc = self as any as AnyWithProps
+  const failures = new Set<Schema.Schema.All>([rpc.errorSchema])
   const streamSchemas = RpcSchema.getStreamSchemas(rpc.successSchema.ast)
+  if (Option.isSome(streamSchemas)) {
+    failures.add(streamSchemas.value.failure)
+  }
+  for (const middleware of rpc.middlewares) {
+    failures.add(middleware.failure)
+  }
   const schema = Schema.Exit({
     success: Option.isSome(streamSchemas) ? Schema.Void : rpc.successSchema,
-    failure: Option.isSome(streamSchemas) ?
-      Schema.Union(
-        streamSchemas.value.failure,
-        rpc.errorSchema
-      ) :
-      rpc.errorSchema,
+    failure: Schema.Union(...failures),
     defect: Schema.Defect
   })
   exitSchemaCache.set(self, schema)
@@ -614,24 +740,55 @@ export const exitSchema = <R extends Any>(
 
 /**
  * @since 1.0.0
- * @category Fork
+ * @category Wrapper
  */
-export const ForkTypeId: unique symbol = Symbol.for("@effect/rpc/Rpc/Fork")
+export const WrapperTypeId: unique symbol = Symbol.for("@effect/rpc/Rpc/Wrapper")
 
 /**
  * @since 1.0.0
- * @category Fork
+ * @category Wrapper
  */
-export type ForkTypeId = typeof ForkTypeId
+export type WrapperTypeId = typeof WrapperTypeId
 
 /**
  * @since 1.0.0
- * @category Fork
+ * @category Wrapper
  */
-export interface Fork<A> {
-  readonly [ForkTypeId]: ForkTypeId
+export interface Wrapper<A> {
+  readonly [WrapperTypeId]: WrapperTypeId
   readonly value: A
+  readonly fork: boolean
+  readonly uninterruptible: boolean
 }
+
+/**
+ * @since 1.0.0
+ * @category Wrapper
+ */
+export const isWrapper = (u: object): u is Wrapper<any> => WrapperTypeId in u
+
+/**
+ * @since 1.0.0
+ * @category Wrapper
+ */
+export const wrap = (options: {
+  readonly fork?: boolean | undefined
+  readonly uninterruptible?: boolean | undefined
+}) =>
+<A extends object>(value: A): A extends Wrapper<infer _> ? A : Wrapper<A> =>
+  (isWrapper(value) ?
+    {
+      [WrapperTypeId]: WrapperTypeId,
+      value: value.value,
+      fork: options.fork ?? value.fork,
+      uninterruptible: options.uninterruptible ?? value.uninterruptible
+    } :
+    {
+      [WrapperTypeId]: WrapperTypeId,
+      value,
+      fork: options.fork ?? false,
+      uninterruptible: options.uninterruptible ?? false
+    }) as any
 
 /**
  * You can use `fork` to wrap a response Effect or Stream, to ensure that the
@@ -639,12 +796,17 @@ export interface Fork<A> {
  * setting.
  *
  * @since 1.0.0
- * @category Fork
+ * @category Wrapper
  */
-export const fork = <A>(value: A): Fork<A> => ({ [ForkTypeId]: ForkTypeId, value })
+export const fork: <A extends object>(value: A) => A extends Wrapper<infer _> ? A : Wrapper<A> = wrap({ fork: true })
 
 /**
+ * You can use `uninterruptible` to wrap a response Effect or Stream, to ensure
+ * that it is executed inside an uninterruptible region.
+ *
  * @since 1.0.0
- * @category Fork
+ * @category Wrapper
  */
-export const isFork = (u: object): u is Fork<any> => ForkTypeId in u
+export const uninterruptible: <A extends object>(value: A) => A extends Wrapper<infer _> ? A : Wrapper<A> = wrap({
+  uninterruptible: true
+})

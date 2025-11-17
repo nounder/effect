@@ -7,12 +7,6 @@ import * as Metric from "effect/Metric"
  * @since 1.0.0
  * @category metrics
  */
-export const shards = Metric.gauge("effect_cluster_shards")
-
-/**
- * @since 1.0.0
- * @category metrics
- */
 export const entities = Metric.gauge("effect_cluster_entities", {
   bigint: true
 })
@@ -21,7 +15,7 @@ export const entities = Metric.gauge("effect_cluster_entities", {
  * @since 1.0.0
  * @category metrics
  */
-export const mailboxSize = Metric.gauge("effect_cluster_mailbox_size", {
+export const singletons = Metric.gauge("effect_cluster_singletons", {
   bigint: true
 })
 
@@ -29,34 +23,22 @@ export const mailboxSize = Metric.gauge("effect_cluster_mailbox_size", {
  * @since 1.0.0
  * @category metrics
  */
-export const singletons = Metric.gauge("effect_cluster_singletons")
+export const runners = Metric.gauge("effect_cluster_runners", {
+  bigint: true
+})
 
 /**
  * @since 1.0.0
  * @category metrics
  */
-export const runners = Metric.gauge("effect_cluster_runners")
+export const runnersHealthy = Metric.gauge("effect_cluster_runners_healthy", {
+  bigint: true
+})
 
 /**
  * @since 1.0.0
  * @category metrics
  */
-export const assignedShards = Metric.gauge("effect_cluster_shards_assigned")
-
-/**
- * @since 1.0.0
- * @category metrics
- */
-export const unassignedShards = Metric.gauge("effect_cluster_shards_unassigned")
-
-/**
- * @since 1.0.0
- * @category metrics
- */
-export const rebalances = Metric.counter("effect_cluster_rebalances")
-
-/**
- * @since 1.0.0
- * @category metrics
- */
-export const runnerHealthChecked = Metric.counter("effect_cluster_runner_health_checked")
+export const shards = Metric.gauge("effect_cluster_shards", {
+  bigint: true
+})

@@ -1,5 +1,4 @@
 import { describe, it } from "@effect/vitest"
-import { Chunk, Either, flow, Number as Num, Option, pipe, String as Str } from "effect"
 import {
   assertFalse,
   assertLeft,
@@ -10,7 +9,8 @@ import {
   deepStrictEqual,
   strictEqual,
   throws
-} from "effect/test/util"
+} from "@effect/vitest/utils"
+import { Chunk, Either, flow, Number as Num, Option, pipe, String as Str } from "effect"
 
 describe("Either", () => {
   it("void", () => {
@@ -119,7 +119,7 @@ describe("Either", () => {
 
   it("inspect", () => {
     if (typeof window === "undefined") {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { inspect } = require("node:util")
       deepStrictEqual(inspect(Either.right(1)), inspect({ _id: "Either", _tag: "Right", right: 1 }))
       deepStrictEqual(inspect(Either.left("e")), inspect({ _id: "Either", _tag: "Left", left: "e" }))
@@ -304,8 +304,7 @@ describe("Either", () => {
 
   it("getOrThrowWith", () => {
     strictEqual(pipe(Either.right(1), Either.getOrThrowWith((e) => new Error(`Unexpected Left: ${e}`))), 1)
-    throws(() => pipe(Either.left("e"), Either.getOrThrowWith((e) => new Error(`Unexpected Left: ${e}`)))),
-      new Error("Unexpected Left: e")
+    throws(() => pipe(Either.left("e"), Either.getOrThrowWith((e) => new Error(`Unexpected Left: ${e}`))))
   })
 
   it("getOrThrow", () => {
@@ -381,6 +380,14 @@ describe("Either", () => {
     it("bindTo", () => {
       assertRight(pipe(Either.right(1), Either.bindTo("a")), { a: 1 })
       assertLeft(pipe(Either.left("left"), Either.bindTo("a")), "left")
+      assertRight(
+        pipe(
+          Either.right(1),
+          Either.bindTo("__proto__"),
+          Either.bind("a", () => Either.right(1))
+        ),
+        { a: 1, ["__proto__"]: 1 }
+      )
     })
 
     it("bind", () => {
@@ -396,6 +403,15 @@ describe("Either", () => {
         pipe(Either.left("left"), Either.bindTo("a"), Either.bind("b", () => Either.right(2))),
         "left"
       )
+      assertRight(
+        pipe(
+          Either.right(1),
+          Either.bindTo("a"),
+          Either.bind("__proto__", ({ a }) => Either.right(a + 1)),
+          Either.bind("b", ({ a }) => Either.right(a + 1))
+        ),
+        { a: 1, b: 2, ["__proto__"]: 2 }
+      )
     })
 
     it("let", () => {
@@ -403,6 +419,15 @@ describe("Either", () => {
       assertLeft(
         pipe(Either.left("left"), Either.bindTo("a"), Either.let("b", () => 2)),
         "left"
+      )
+      assertRight(
+        pipe(
+          Either.right(1),
+          Either.bindTo("a"),
+          Either.let("__proto__", ({ a }) => a + 1),
+          Either.let("b", ({ a }) => a + 1)
+        ),
+        { a: 1, b: 2, ["__proto__"]: 2 }
       )
     })
   })

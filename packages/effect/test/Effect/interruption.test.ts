@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertSome, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import * as Array from "effect/Array"
 import * as Cause from "effect/Cause"
 import * as Chunk from "effect/Chunk"
@@ -14,9 +15,8 @@ import * as HashSet from "effect/HashSet"
 import * as MutableRef from "effect/MutableRef"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
-import { assertFalse, assertSome, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
-import { withLatch, withLatchAwait } from "effect/test/utils/latch"
 import * as TestClock from "effect/TestClock"
+import { withLatch, withLatchAwait } from "../utils/latch.js"
 
 describe("Effect", () => {
   it.effect("sync forever is interruptible", () =>
@@ -97,13 +97,11 @@ describe("Effect", () => {
     Effect.gen(function*() {
       const deferred1 = yield* (Deferred.make<void>())
       const deferred2 = yield* (Deferred.make<void>())
-      const fiber = yield* pipe(
-        Effect.fork(
-          Effect.acquireUseRelease(
-            Effect.void,
-            () => pipe(Deferred.succeed(deferred1, void 0), Effect.zipRight(Effect.never)),
-            () => pipe(Deferred.succeed(deferred2, void 0), Effect.zipRight(Effect.void))
-          )
+      const fiber = yield* Effect.fork(
+        Effect.acquireUseRelease(
+          Effect.void,
+          () => pipe(Deferred.succeed(deferred1, void 0), Effect.zipRight(Effect.never)),
+          () => pipe(Deferred.succeed(deferred2, void 0), Effect.zipRight(Effect.void))
         )
       )
       yield* (Deferred.await(deferred1))

@@ -51,7 +51,7 @@ export class UserRpcs extends RpcGroup.make(
 
 This section introduces how to implement the rpc handlers, using an imaginary database setup to manage user data.
 
-```ts filename="router.ts"
+```ts filename="handers.ts"
 // handlers.ts
 import type { Rpc } from "@effect/rpc"
 import { Effect, Layer, Ref, Stream } from "effect"
@@ -119,21 +119,29 @@ This part explains how to serve the API using the handlers we defined earlier.
 
 ```ts filename="server.ts"
 // server.ts
-import { HttpRouter, HttpServer } from "@effect/platform"
-import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
-import { toHttpApp } from "@effect/rpc-http/HttpRpcRouter"
+import { HttpRouter } from "@effect/platform"
+import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
+import { RpcSerialization, RpcServer } from "@effect/rpc"
 import { Layer } from "effect"
-import { createServer } from "http"
-import { appRouter } from "./router.js"
+import { UsersLive } from "./handlers.js"
+import { UserRpcs } from "./request.js"
 
-const HttpLive = HttpRouter.empty.pipe(
-  HttpRouter.post("/rpc", toHttpApp(appRouter)),
-  HttpServer.serve(),
-  HttpServer.withLogAddress,
-  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 }))
+// Create the RPC server layer
+const RpcLayer = RpcServer.layer(UserRpcs).pipe(Layer.provide(UsersLive))
+
+// Choose the protocol and serialization format
+const HttpProtocol = RpcServer.layerProtocolHttp({
+  path: "/rpc"
+}).pipe(Layer.provide(RpcSerialization.layerNdjson))
+
+// Create the main server layer
+const Main = HttpRouter.Default.serve().pipe(
+  Layer.provide(RpcLayer),
+  Layer.provide(HttpProtocol),
+  Layer.provide(BunHttpServer.layer({ port: 3000 }))
 )
 
-NodeRuntime.runMain(Layer.launch(HttpLive))
+BunRuntime.runMain(Layer.launch(Main))
 ```
 
 **Testing the API with curl**
@@ -142,8 +150,8 @@ Use this `curl` command to test if the API is operational:
 
 ```bash
 curl -X POST http://localhost:3000/rpc \
-     -H "Content-Type: application/json" \
-     -d $'{"_tag": "Request", "id": "123", "tag": "UserList", "payload": {}, "traceId": "traceId", "spanId": "spanId", "sampled": true, "headers": {} }\n'
+     -H "Content-Type: application/ndjson" \
+     -d $'{"_tag": "Request", "id": "123", "tag": "UserList", "payload": {}, "traceId": "traceId", "spanId": "spanId", "sampled": true, "headers": [] }\n'
 ```
 
 ## Using your new backend on the client
@@ -154,7 +162,7 @@ Let's now move to the client-side code and embrace the power of end-to-end types
 // client.ts
 import { FetchHttpClient } from "@effect/platform"
 import { RpcClient, RpcSerialization } from "@effect/rpc"
-import { Chunk, Effect, Layer, Stream } from "effect"
+import { Chunk, Effect, Layer, Option, Stream } from "effect"
 import { UserRpcs } from "./request.js"
 
 // Choose which protocol to use
@@ -173,7 +181,7 @@ const ProtocolLive = RpcClient.layerProtocolHttp({
 const program = Effect.gen(function* () {
   const client = yield* RpcClient.make(UserRpcs)
   let users = yield* Stream.runCollect(client.UserList({}))
-  if (!Chunk.findFirst(users, (user) => user.id === "3")) {
+  if (Option.isNone(Chunk.findFirst(users, (user) => user.id === "3"))) {
     console.log(`Creating user "Charlie"`)
     yield* client.UserCreate({ name: "Charlie" })
     users = yield* Stream.runCollect(client.UserList({}))

@@ -1,5 +1,5 @@
 import * as Either from "../Either.js"
-import { identity } from "../Function.js"
+import { dual, identity } from "../Function.js"
 import type {
   Case,
   Matcher,
@@ -56,7 +56,9 @@ const ValueMatcherProto: Omit<
   [TypeId]: {
     _input: identity,
     _filters: identity,
+    _remaining: identity,
     _result: identity,
+    _provided: identity,
     _return: identity
   },
   _tag: "ValueMatcher",
@@ -209,19 +211,31 @@ export const value = <const I>(
 ): Matcher<I, Types.Without<never>, I, never, I> => makeValueMatcher(i, Either.left(i))
 
 /** @internal */
-export const valueTags = <
-  const I,
-  P extends {
-    readonly [Tag in Types.Tags<"_tag", I> & string]: (
-      _: Extract<I, { readonly _tag: Tag }>
-    ) => any
+export const valueTags: {
+  <
+    const I,
+    P extends
+      & { readonly [Tag in Types.Tags<"_tag", I> & string]: (_: Extract<I, { readonly _tag: Tag }>) => any }
+      & { readonly [Tag in Exclude<keyof P, Types.Tags<"_tag", I>>]: never }
+  >(fields: P): (input: I) => Unify<ReturnType<P[keyof P]>>
+  <
+    const I,
+    P extends
+      & { readonly [Tag in Types.Tags<"_tag", I> & string]: (_: Extract<I, { readonly _tag: Tag }>) => any }
+      & { readonly [Tag in Exclude<keyof P, Types.Tags<"_tag", I>>]: never }
+  >(input: I, fields: P): Unify<ReturnType<P[keyof P]>>
+} = dual(
+  2,
+  <
+    const I,
+    P extends
+      & { readonly [Tag in Types.Tags<"_tag", I> & string]: (_: Extract<I, { readonly _tag: Tag }>) => any }
+      & { readonly [Tag in Exclude<keyof P, Types.Tags<"_tag", I>>]: never }
+  >(input: I, fields: P): Unify<ReturnType<P[keyof P]>> => {
+    const match: any = tagsExhaustive(fields as any)(makeTypeMatcher([]))
+    return match(input)
   }
->(
-  fields: P
-) => {
-  const match: any = tagsExhaustive(fields as any)(makeTypeMatcher([]))
-  return (input: I): Unify<ReturnType<P[keyof P]>> => match(input)
-}
+)
 
 /** @internal */
 export const typeTags = <I>() =>
@@ -497,7 +511,7 @@ export const is: <
   Literals extends ReadonlyArray<string | number | boolean | null | bigint>
 >(
   ...literals: Literals
-) => Predicate.Refinement<unknown, Literals[number]> = (...literals): any => {
+) => SafeRefinement<Literals[number]> = (...literals): any => {
   const len = literals.length
   return (u: unknown) => {
     for (let i = 0; i < len; i++) {

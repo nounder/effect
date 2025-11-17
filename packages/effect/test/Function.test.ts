@@ -1,13 +1,16 @@
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual, strictEqual, throws } from "@effect/vitest/utils"
 import { Function, String } from "effect"
-import { deepStrictEqual, strictEqual, throws } from "effect/test/util"
 
 const f = (n: number): number => n + 1
 const g = (n: number) => n * 2
 
 describe("Function", () => {
   it("apply", () => {
-    deepStrictEqual(Function.pipe(String.length, Function.apply("a")), 1)
+    const countArgs = (...args: Array<unknown>) => args.length
+
+    deepStrictEqual(Function.pipe(countArgs, Function.apply("a")), 1)
+    deepStrictEqual(Function.pipe(countArgs, Function.apply("a", "b", "c")), 3)
   })
 
   it("compose", () => {
@@ -89,6 +92,7 @@ describe("Function", () => {
 
   it("pipe()", () => {
     const pipe = Function.pipe // this alias is required in order to exclude the `@effect/babel-plugin` compiler and get 100% coverage
+    // @effect-diagnostics-next-line unnecessaryPipe:off
     deepStrictEqual(pipe(2), 2)
     deepStrictEqual(pipe(2, f), 3)
     deepStrictEqual(pipe(2, f, g), 6)

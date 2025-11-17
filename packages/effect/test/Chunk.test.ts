@@ -1,5 +1,16 @@
 import { describe, it } from "@effect/vitest"
 import {
+  assertEquals,
+  assertFalse,
+  assertNone,
+  assertSome,
+  assertTrue,
+  deepStrictEqual,
+  doesNotThrow,
+  strictEqual,
+  throws
+} from "@effect/vitest/utils"
+import {
   Array as Arr,
   Chunk,
   Either,
@@ -12,17 +23,6 @@ import {
   pipe,
   type Predicate
 } from "effect"
-import {
-  assertEquals,
-  assertFalse,
-  assertNone,
-  assertSome,
-  assertTrue,
-  deepStrictEqual,
-  doesNotThrow,
-  strictEqual,
-  throws
-} from "effect/test/util"
 
 const assertTuple = <A, B>(
   actual: [Chunk.Chunk<A>, Chunk.Chunk<B>],
@@ -82,7 +82,7 @@ describe("Chunk", () => {
 
   it("inspect", () => {
     if (typeof window === "undefined") {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { inspect } = require("node:util")
       assertEquals(inspect(Chunk.make(0, 1, 2)), inspect({ _id: "Chunk", values: [0, 1, 2] }))
     }
@@ -114,6 +114,11 @@ describe("Chunk", () => {
   it("remove", () => {
     assertEquals(pipe(Chunk.empty(), Chunk.remove(0)), Chunk.empty())
     assertEquals(pipe(Chunk.make(1, 2, 3), Chunk.remove(0)), Chunk.make(2, 3))
+  })
+
+  it("removeOption", () => {
+    assertNone(pipe(Chunk.empty(), Chunk.removeOption(0)))
+    assertSome(pipe(Chunk.make(1, 2, 3), Chunk.removeOption(0)), Chunk.make(2, 3))
   })
 
   it("chunksOf", () => {
@@ -307,7 +312,7 @@ describe("Chunk", () => {
     })
 
     describe("Given a singleton Chunk and an index out of bounds", () => {
-      const chunk = pipe(Chunk.make(1))
+      const chunk = Chunk.make(1)
       const index = 4
 
       it("should throw", () => {
@@ -316,7 +321,7 @@ describe("Chunk", () => {
     })
 
     describe("Given an array Chunk and an index out of bounds", () => {
-      const chunk = pipe(Chunk.unsafeFromArray([1, 2]))
+      const chunk = Chunk.unsafeFromArray([1, 2])
       const index = 4
 
       it("should throw", () => {
@@ -352,7 +357,7 @@ describe("Chunk", () => {
     })
 
     describe("Given a singleton Chunk and an index in bounds", () => {
-      const chunk = pipe(Chunk.make(1))
+      const chunk = Chunk.make(1)
       const index = 0
 
       it("should return the value", () => {

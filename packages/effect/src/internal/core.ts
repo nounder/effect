@@ -1422,7 +1422,7 @@ export const gen: typeof Effect.gen = function() {
 }
 
 /** @internal */
-export const fnUntraced: Effect.fn.Gen = (body: Function, ...pipeables: Array<any>) =>
+export const fnUntraced: Effect.fn.Untraced = (body: Function, ...pipeables: Array<any>) =>
   Object.defineProperty(
     pipeables.length === 0
       ? function(this: any, ...args: Array<any>) {
@@ -2083,6 +2083,12 @@ export const currentUnhandledErrorLogLevel: FiberRef.FiberRef<Option.Option<LogL
 )
 
 /** @internal */
+export const currentVersionMismatchErrorLogLevel: FiberRef.FiberRef<Option.Option<LogLevel.LogLevel>> = globalValue(
+  Symbol.for("effect/FiberRef/versionMismatchErrorLogLevel"),
+  () => fiberRefUnsafeMake(Option.some<LogLevel.LogLevel>(logLevelWarning))
+)
+
+/** @internal */
 export const withUnhandledErrorLogLevel = dual<
   (level: Option.Option<LogLevel.LogLevel>) => <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
   <A, E, R>(self: Effect.Effect<A, E, R>, level: Option.Option<LogLevel.LogLevel>) => Effect.Effect<A, E, R>
@@ -2241,6 +2247,7 @@ export const YieldableError: new(message?: string, options?: ErrorOptions) => Ca
       return this
     }
   }
+  // @effect-diagnostics-next-line floatingEffect:off
   Object.assign(YieldableError.prototype, StructuralCommitPrototype)
   return YieldableError as any
 })()

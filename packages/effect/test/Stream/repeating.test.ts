@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import * as Chunk from "effect/Chunk"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -11,7 +12,6 @@ import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
-import { deepStrictEqual, strictEqual } from "effect/test/util"
 import * as TestClock from "effect/TestClock"
 import * as TestEnvironment from "effect/TestContext"
 
@@ -65,6 +65,63 @@ describe("Stream", () => {
       yield* (Fiber.join(fiber))
       const result = yield* (Ref.get(ref))
       deepStrictEqual(Array.from(result), [1, 1])
+    }))
+
+  it.effect("repeat - Schedule.CurrentIterationMetadata", () =>
+    Effect.gen(function*() {
+      const ref = yield* (Ref.make(Chunk.empty<undefined | Schedule.IterationMetadata>()))
+      const fiber = yield* pipe(
+        Stream.fromEffect(
+          Schedule.CurrentIterationMetadata.pipe(
+            Effect.flatMap((currentIterationMetadata) => Ref.update(ref, Chunk.append(currentIterationMetadata)))
+          )
+        ),
+        Stream.repeat(Schedule.exponential(Duration.millis(10))),
+        Stream.runDrain,
+        Effect.fork
+      )
+
+      yield* (TestClock.adjust(Duration.millis(70)))
+      yield* (Fiber.interrupt(fiber))
+      const result = yield* (Ref.get(ref))
+      deepStrictEqual(Array.from(result), [
+        {
+          elapsed: Duration.zero,
+          elapsedSincePrevious: Duration.zero,
+          input: undefined,
+          output: undefined,
+          now: 0,
+          recurrence: 0,
+          start: 0
+        },
+        {
+          elapsed: Duration.zero,
+          elapsedSincePrevious: Duration.zero,
+          input: undefined,
+          output: Duration.millis(10),
+          now: 0,
+          recurrence: 1,
+          start: 0
+        },
+        {
+          elapsed: Duration.millis(10),
+          elapsedSincePrevious: Duration.millis(10),
+          input: undefined,
+          output: Duration.millis(20),
+          now: 10,
+          recurrence: 2,
+          start: 0
+        },
+        {
+          elapsed: Duration.millis(30),
+          elapsedSincePrevious: Duration.millis(20),
+          input: undefined,
+          output: Duration.millis(40),
+          now: 30,
+          recurrence: 3,
+          start: 0
+        }
+      ])
     }))
 
   it.effect("repeat - does not swallow errors on a repetition", () =>

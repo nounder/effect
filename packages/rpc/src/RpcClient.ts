@@ -35,9 +35,10 @@ import type { Span } from "effect/Tracer"
 import type { Mutable } from "effect/Types"
 import { withRun } from "./internal/utils.js"
 import * as Rpc from "./Rpc.js"
+import { RpcClientError } from "./RpcClientError.js"
 import type * as RpcGroup from "./RpcGroup.js"
-import type { FromClient, FromClientEncoded, FromServer, FromServerEncoded, Request, RequestId } from "./RpcMessage.js"
-import { constPing } from "./RpcMessage.js"
+import type { FromClient, FromClientEncoded, FromServer, FromServerEncoded, Request } from "./RpcMessage.js"
+import { constPing, RequestId } from "./RpcMessage.js"
 import type * as RpcMiddleware from "./RpcMiddleware.js"
 import * as RpcSchema from "./RpcSchema.js"
 import * as RpcSerialization from "./RpcSerialization.js"
@@ -47,10 +48,109 @@ import * as RpcWorker from "./RpcWorker.js"
  * @since 1.0.0
  * @category client
  */
-export type RpcClient<Rpcs extends Rpc.Any, E = never> = {
-  readonly [Current in Rpcs as Current["_tag"]]: <const AsMailbox extends boolean = false, const Discard = false>(
-    input: Rpc.PayloadConstructor<Current>,
-    options?: Rpc.Success<Current> extends Stream.Stream<infer _A, infer _E, infer _R> ? {
+export type RpcClient<Rpcs extends Rpc.Any, E = never> = Schema.Simplify<
+  & RpcClient.From<RpcClient.NonPrefixed<Rpcs>, E, "">
+  & {
+    readonly [CurrentPrefix in RpcClient.Prefixes<Rpcs>]: RpcClient.From<
+      RpcClient.Prefixed<Rpcs, CurrentPrefix>,
+      E,
+      CurrentPrefix
+    >
+  }
+>
+
+/**
+ * @since 1.0.0
+ * @category client
+ */
+export declare namespace RpcClient {
+  /**
+   * @since 1.0.0
+   * @category client
+   */
+  export type Prefixes<Rpcs extends Rpc.Any> = Rpcs["_tag"] extends infer Tag
+    ? Tag extends `${infer Prefix}.${string}` ? Prefix : never
+    : never
+
+  /**
+   * @since 1.0.0
+   * @category client
+   */
+  export type NonPrefixed<Rpcs extends Rpc.Any> = Exclude<Rpcs, { readonly _tag: `${string}.${string}` }>
+
+  /**
+   * @since 1.0.0
+   * @category client
+   */
+  export type Prefixed<Rpcs extends Rpc.Any, Prefix extends string> = Extract<
+    Rpcs,
+    { readonly _tag: `${Prefix}.${string}` }
+  >
+
+  /**
+   * @since 1.0.0
+   * @category client
+   */
+  export type From<Rpcs extends Rpc.Any, E = never, Prefix extends string = ""> = {
+    readonly [
+      Current in Rpcs as Current["_tag"] extends `${Prefix}.${infer Method}` ? Method
+        : Current["_tag"]
+    ]: <
+      const AsMailbox extends boolean = false,
+      const Discard = false
+    >(
+      input: Rpc.PayloadConstructor<Current>,
+      options?: Rpc.Success<Current> extends Stream.Stream<infer _A, infer _E, infer _R> ? {
+          readonly asMailbox?: AsMailbox | undefined
+          readonly streamBufferSize?: number | undefined
+          readonly headers?: Headers.Input | undefined
+          readonly context?: Context.Context<never> | undefined
+        } :
+        {
+          readonly headers?: Headers.Input | undefined
+          readonly context?: Context.Context<never> | undefined
+          readonly discard?: Discard | undefined
+        }
+    ) => Current extends Rpc.Rpc<
+      infer _Tag,
+      infer _Payload,
+      infer _Success,
+      infer _Error,
+      infer _Middleware
+    > ? [_Success] extends [RpcSchema.Stream<infer _A, infer _E>] ? AsMailbox extends true ? Effect.Effect<
+            Mailbox.ReadonlyMailbox<_A["Type"], _E["Type"] | _Error["Type"] | E | _Middleware["failure"]["Type"]>,
+            never,
+            | Scope.Scope
+            | _Payload["Context"]
+            | _Success["Context"]
+            | _Error["Context"]
+            | _Middleware["failure"]["Context"]
+          >
+        : Stream.Stream<
+          _A["Type"],
+          _E["Type"] | _Error["Type"] | E | _Middleware["failure"]["Type"],
+          _Payload["Context"] | _Success["Context"] | _Error["Context"] | _Middleware["failure"]["Context"]
+        >
+      : Effect.Effect<
+        Discard extends true ? void : _Success["Type"],
+        Discard extends true ? E : _Error["Type"] | E | _Middleware["failure"]["Type"],
+        _Payload["Context"] | _Success["Context"] | _Error["Context"] | _Middleware["failure"]["Context"]
+      > :
+      never
+  }
+
+  /**
+   * @since 1.0.0
+   * @category client
+   */
+  export type Flat<Rpcs extends Rpc.Any, E = never> = <
+    const Tag extends Rpcs["_tag"],
+    const AsMailbox extends boolean = false,
+    const Discard = false
+  >(
+    tag: Tag,
+    payload: Rpc.PayloadConstructor<Rpc.ExtractTag<Rpcs, Tag>>,
+    options?: Rpc.Success<Rpc.ExtractTag<Rpcs, Tag>> extends Stream.Stream<infer _A, infer _E, infer _R> ? {
         readonly asMailbox?: AsMailbox | undefined
         readonly streamBufferSize?: number | undefined
         readonly headers?: Headers.Input | undefined
@@ -61,26 +161,30 @@ export type RpcClient<Rpcs extends Rpc.Any, E = never> = {
         readonly context?: Context.Context<never> | undefined
         readonly discard?: Discard | undefined
       }
-  ) => Current extends Rpc.Rpc<
+  ) => Rpc.ExtractTag<Rpcs, Tag> extends Rpc.Rpc<
     infer _Tag,
     infer _Payload,
     infer _Success,
     infer _Error,
     infer _Middleware
   > ? [_Success] extends [RpcSchema.Stream<infer _A, infer _E>] ? AsMailbox extends true ? Effect.Effect<
-          Mailbox.ReadonlyMailbox<_A["Type"], _E["Type"] | _Error["Type"] | E>,
+          Mailbox.ReadonlyMailbox<_A["Type"], _E["Type"] | _Error["Type"] | E | _Middleware["failure"]["Type"]>,
           never,
-          Scope.Scope | _Payload["Context"] | _Success["Context"] | _Error["Context"]
+          | Scope.Scope
+          | _Payload["Context"]
+          | _Success["Context"]
+          | _Error["Context"]
+          | _Middleware["failure"]["Context"]
         >
       : Stream.Stream<
         _A["Type"],
-        _E["Type"] | _Error["Type"] | E,
-        _Payload["Context"] | _Success["Context"] | _Error["Context"]
+        _E["Type"] | _Error["Type"] | E | _Middleware["failure"]["Type"],
+        _Payload["Context"] | _Success["Context"] | _Error["Context"] | _Middleware["failure"]["Context"]
       >
     : Effect.Effect<
       Discard extends true ? void : _Success["Type"],
-      Discard extends true ? never : _Error["Type"] | E,
-      _Payload["Context"] | _Success["Context"] | _Error["Context"]
+      Discard extends true ? E : _Error["Type"] | E | _Middleware["failure"]["Type"],
+      _Payload["Context"] | _Success["Context"] | _Error["Context"] | _Middleware["failure"]["Context"]
     > :
     never
 }
@@ -89,7 +193,7 @@ export type RpcClient<Rpcs extends Rpc.Any, E = never> = {
  * @since 1.0.0
  * @category client
  */
-export type FromGroup<Group> = RpcClient<RpcGroup.Rpcs<Group>>
+export type FromGroup<Group, E = never> = RpcClient<RpcGroup.Rpcs<Group>, E>
 
 let requestIdCounter = BigInt(0)
 
@@ -97,7 +201,7 @@ let requestIdCounter = BigInt(0)
  * @since 1.0.0
  * @category client
  */
-export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
+export const makeNoSerialization: <Rpcs extends Rpc.Any, E, const Flatten extends boolean = false>(
   group: RpcGroup.RpcGroup<Rpcs>,
   options: {
     readonly onFromClient: (
@@ -109,17 +213,19 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
     ) => Effect.Effect<void, E>
     readonly supportsAck?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
     readonly generateRequestId?: (() => RequestId) | undefined
     readonly disableTracing?: boolean | undefined
+    readonly flatten?: Flatten | undefined
   }
 ) => Effect.Effect<
   {
-    readonly client: RpcClient<Rpcs, E>
+    readonly client: Flatten extends true ? RpcClient.Flat<Rpcs, E> : RpcClient<Rpcs, E>
     readonly write: (message: FromServer<Rpcs>) => Effect.Effect<void>
   },
   never,
   Scope.Scope | Rpc.MiddlewareClient<Rpcs>
-> = Effect.fnUntraced(function*<Rpcs extends Rpc.Any, E>(
+> = Effect.fnUntraced(function*<Rpcs extends Rpc.Any, E, const Flatten extends boolean = false>(
   group: RpcGroup.RpcGroup<Rpcs>,
   options: {
     readonly onFromClient: (
@@ -131,8 +237,10 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
     ) => Effect.Effect<void, E>
     readonly supportsAck?: boolean | undefined
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
     readonly generateRequestId?: (() => RequestId) | undefined
     readonly disableTracing?: boolean | undefined
+    readonly flatten?: Flatten | undefined
   }
 ) {
   const spanPrefix = options?.spanPrefix ?? "RpcClient"
@@ -160,9 +268,9 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
   let isShutdown = false
   yield* Scope.addFinalizer(
     scope,
-    Effect.fiberIdWith((fiberId) => {
+    Effect.suspend(() => {
       isShutdown = true
-      return clearEntries(Exit.interrupt(fiberId))
+      return clearEntries(Exit.interrupt(fiberIdTransientInterrupt))
     })
   )
 
@@ -180,42 +288,41 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
   const onRequest = (rpc: Rpc.AnyWithProps) => {
     const isStream = RpcSchema.isStreamSchema(rpc.successSchema)
     const middleware = getRpcClientMiddleware(rpc)
-    return (payload: any, options?: {
+    return (payload: any, opts?: {
       readonly asMailbox?: boolean | undefined
       readonly streamBufferSize?: number | undefined
       readonly headers?: Headers.Input | undefined
       readonly context?: Context.Context<never> | undefined
       readonly discard?: boolean | undefined
     }) => {
-      const headers = options?.headers ? Headers.fromInput(options.headers) : Headers.empty
+      const headers = opts?.headers ? Headers.fromInput(opts.headers) : Headers.empty
+      const context = opts?.context ?? Context.empty()
       if (!isStream) {
-        const effect = Effect.useSpan(
+        const onRequest = (span: Span | undefined) =>
+          onEffectRequest(
+            rpc,
+            middleware,
+            span,
+            rpc.payloadSchema.make ? rpc.payloadSchema.make(payload) : payload,
+            headers,
+            context,
+            opts?.discard ?? false
+          )
+        return disableTracing ? onRequest(undefined) : Effect.useSpan(
           `${spanPrefix}.${rpc._tag}`,
-          { captureStackTrace: false },
-          (span) =>
-            onEffectRequest(
-              rpc,
-              middleware,
-              span,
-              payload ? rpc.payloadSchema.make(payload) : {},
-              headers,
-              options?.context ?? Context.empty(),
-              options?.discard ?? false
-            )
+          { captureStackTrace: false, attributes: options.spanAttributes },
+          onRequest
         )
-        return disableTracing ? Effect.withTracerEnabled(effect, false) : effect
       }
-      const mailbox = Effect.suspend(() =>
-        onStreamRequest(
-          rpc,
-          middleware,
-          payload ? rpc.payloadSchema.make(payload) : {},
-          headers,
-          options?.streamBufferSize ?? 16,
-          options?.context ?? Context.empty()
-        )
+      const mailbox = onStreamRequest(
+        rpc,
+        middleware,
+        rpc.payloadSchema.make ? rpc.payloadSchema.make(payload) : payload,
+        headers,
+        opts?.streamBufferSize ?? 16,
+        context
       )
-      if (options?.asMailbox) return mailbox
+      if (opts?.asMailbox) return mailbox
       return Stream.unwrapScoped(Effect.map(mailbox, Mailbox.toStream))
     }
   }
@@ -223,7 +330,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
   const onEffectRequest = (
     rpc: Rpc.AnyWithProps,
     middleware: (request: Request<Rpcs>) => Effect.Effect<Request<Rpcs>>,
-    span: Span,
+    span: Span | undefined,
     payload: any,
     headers: Headers.Headers,
     context: Context.Context<never>,
@@ -239,9 +346,9 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
         id,
         tag: rpc._tag as Rpc.Tag<Rpcs>,
         payload,
-        traceId: span.traceId,
-        spanId: span.spanId,
-        sampled: span.sampled,
+        traceId: span?.traceId,
+        spanId: span?.spanId,
+        sampled: span?.sampled,
         headers: Headers.merge(parentFiber.getFiberRef(currentHeaders), headers)
       })
       if (discard) {
@@ -258,6 +365,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
         runtimeFlags: Runtime.defaultRuntime.runtimeFlags
       })
       let fiber: Fiber.RuntimeFiber<any, any>
+      let completed = false
       return Effect.onInterrupt(
         Effect.async<any, any>((resume) => {
           const entry: ClientEntry = {
@@ -265,8 +373,9 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
             rpc,
             context,
             resume(exit) {
+              completed = true
               resume(exit)
-              if (!fiber.unsafePoll()) {
+              if (fiber && !fiber.unsafePoll()) {
                 parentFiber.currentScheduler.scheduleTask(() => {
                   fiber.unsafeInterruptAsFork(parentFiber.id())
                 }, 0)
@@ -282,7 +391,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
                 discard
               })
             ),
-            Effect.withParentSpan(span),
+            span ? Effect.withParentSpan(span) : identity,
             Runtime.runFork(runtime)
           )
           fiber.addObserver((exit) => {
@@ -292,6 +401,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
           })
         }),
         (interruptors) => {
+          if (completed) return Effect.void
           entries.delete(id)
           const ids = Array.from(interruptors).flatMap((id) => Array.from(FiberId.toSet(id)))
           return Effect.zipRight(
@@ -314,9 +424,10 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
       return yield* Effect.interrupt
     }
 
-    const span = yield* Effect.makeSpanScoped(`${spanPrefix}.${rpc._tag}`, { captureStackTrace: false }).pipe(
-      disableTracing ? Effect.withTracerEnabled(false) : identity
-    )
+    const span = disableTracing ? undefined : yield* Effect.makeSpanScoped(`${spanPrefix}.${rpc._tag}`, {
+      captureStackTrace: false,
+      attributes: options.spanAttributes
+    })
     const fiber = Option.getOrThrow(Fiber.getCurrentFiber())
     const id = generateRequestId()
 
@@ -349,10 +460,10 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
       _tag: "Request",
       id,
       tag: rpc._tag as Rpc.Tag<Rpcs>,
-      traceId: span.traceId,
+      traceId: span?.traceId,
       payload,
-      spanId: span.spanId,
-      sampled: span.sampled,
+      spanId: span?.spanId,
+      sampled: span?.sampled,
       headers: Headers.merge(fiber.getFiberRef(currentHeaders), headers)
     }).pipe(
       Effect.flatMap(
@@ -363,7 +474,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
             discard: false
           })
       ),
-      Effect.withParentSpan(span),
+      span ? Effect.withParentSpan(span) : identity,
       Effect.catchAllCause((error) => mailbox.failCause(error)),
       Effect.interruptible,
       Effect.forkIn(scope)
@@ -429,7 +540,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
   const write = (message: FromServer<Rpcs>): Effect.Effect<void> => {
     switch (message._tag) {
       case "Chunk": {
-        const requestId = parseRequestId(message.requestId)
+        const requestId = message.requestId
         const entry = entries.get(requestId)
         if (!entry || entry._tag !== "Mailbox") return Effect.void
         return entry.mailbox.offerAll(message.values).pipe(
@@ -442,12 +553,11 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
               })
             )
             : identity,
-          Effect.onError((cause) => entry.mailbox.done(Exit.failCause(cause))),
-          Effect.forkIn(entry.scope)
+          Effect.catchAllCause((cause) => entry.mailbox.done(Exit.failCause(cause)))
         )
       }
       case "Exit": {
-        const requestId = parseRequestId(message.requestId)
+        const requestId = message.requestId
         const entry = entries.get(requestId)
         if (!entry) return Effect.void
         entries.delete(requestId)
@@ -466,38 +576,61 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E>(
     }
   }
 
-  const client = {} as Mutable<RpcClient<Rpcs>>
-  for (const rpc of group.requests.values()) {
-    ;(client as any)[rpc._tag] = onRequest(rpc as any)
+  let client: any
+  if (options.flatten) {
+    const fns = new Map<string, any>()
+    client = function client(tag: string, payload: any, options?: {}) {
+      let fn = fns.get(tag)
+      if (!fn) {
+        fn = onRequest(group.requests.get(tag)! as any)
+        fns.set(tag, fn)
+      }
+      return fn(payload, options)
+    }
+  } else {
+    client = {}
+    for (const rpc of group.requests.values()) {
+      const dot = rpc._tag.indexOf(".")
+      const prefix = dot === -1 ? undefined : rpc._tag.slice(0, dot)
+      if (prefix !== undefined && !(prefix in client)) {
+        ;(client as any)[prefix] = {} as Mutable<RpcClient.Prefixed<Rpcs, typeof prefix>>
+      }
+      const target = prefix !== undefined ? (client as any)[prefix] : client
+      const tag = prefix !== undefined ? rpc._tag.slice(dot + 1) : rpc._tag
+      target[tag] = onRequest(rpc as any)
+    }
   }
 
-  return {
-    client: client as RpcClient<Rpcs>,
-    write
-  } as const
+  return { client, write } as const
 })
+
+const fiberIdTransientInterrupt = FiberId.make(-503, 0) as FiberId.Runtime
 
 /**
  * @since 1.0.0
  * @category client
  */
-export const make: <Rpcs extends Rpc.Any>(
+export const make: <Rpcs extends Rpc.Any, const Flatten extends boolean = false>(
   group: RpcGroup.RpcGroup<Rpcs>,
   options?: {
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
     readonly generateRequestId?: (() => RequestId) | undefined
     readonly disableTracing?: boolean | undefined
+    readonly flatten?: Flatten | undefined
   } | undefined
 ) => Effect.Effect<
-  RpcClient<Rpcs>,
+  Flatten extends true ? RpcClient.Flat<Rpcs, RpcClientError> : RpcClient<Rpcs, RpcClientError>,
   never,
   Protocol | Rpc.MiddlewareClient<Rpcs> | Scope.Scope
-> = Effect.fnUntraced(function*<Rpcs extends Rpc.Any>(
+> = Effect.fnUntraced(function*<Rpcs extends Rpc.Any, const Flatten extends boolean = false>(
   group: RpcGroup.RpcGroup<Rpcs>,
   options?: {
     readonly spanPrefix?: string | undefined
+    readonly spanAttributes?: Record<string, unknown> | undefined
     readonly generateRequestId?: (() => RequestId) | undefined
     readonly disableTracing?: boolean | undefined
+    readonly flatten?: Flatten | undefined
   } | undefined
 ) {
   const { run, send, supportsAck, supportsTransferables } = yield* Protocol
@@ -540,16 +673,20 @@ export const make: <Rpcs extends Rpc.Any>(
             Effect.flatMap((payload) =>
               send({
                 ...message,
+                id: String(message.id),
                 payload,
                 headers: Object.entries(message.headers)
               }, collector && collector.unsafeClear())
             )
-          ) as Effect.Effect<void>
+          ) as Effect.Effect<void, RpcClientError>
         }
         case "Ack": {
           const entry = entries.get(message.requestId)
           if (!entry) return Effect.void
-          return send(message) as Effect.Effect<void>
+          return send({
+            _tag: "Ack",
+            requestId: String(message.requestId)
+          }) as Effect.Effect<void, RpcClientError>
         }
         case "Interrupt": {
           const entry = entries.get(message.requestId)
@@ -557,8 +694,8 @@ export const make: <Rpcs extends Rpc.Any>(
           entries.delete(message.requestId)
           return send({
             _tag: "Interrupt",
-            requestId: message.requestId
-          }) as Effect.Effect<void>
+            requestId: String(message.requestId)
+          }) as Effect.Effect<void, RpcClientError>
         }
         case "Eof": {
           return Effect.void
@@ -570,27 +707,27 @@ export const make: <Rpcs extends Rpc.Any>(
   yield* run((message) => {
     switch (message._tag) {
       case "Chunk": {
-        const requestId = parseRequestId(message.requestId)
+        const requestId = RequestId(message.requestId)
         const entry = entries.get(requestId)
         if (!entry || !entry.decodeChunk) return Effect.void
         return entry.decodeChunk(message.values).pipe(
           Effect.locally(FiberRef.currentContext, entry.context),
           Effect.orDie,
           Effect.flatMap((chunk) =>
-            write({ _tag: "Chunk", clientId: 0, requestId: parseRequestId(message.requestId), values: chunk })
+            write({ _tag: "Chunk", clientId: 0, requestId: RequestId(message.requestId), values: chunk })
           ),
           Effect.onError((cause) =>
             write({
               _tag: "Exit",
               clientId: 0,
-              requestId: parseRequestId(message.requestId),
+              requestId: RequestId(message.requestId),
               exit: Exit.failCause(cause)
             })
           )
         ) as Effect.Effect<void>
       }
       case "Exit": {
-        const requestId = parseRequestId(message.requestId)
+        const requestId = RequestId(message.requestId)
         const entry = entries.get(requestId)
         if (!entry) return Effect.void
         entries.delete(requestId)
@@ -604,7 +741,18 @@ export const make: <Rpcs extends Rpc.Any>(
         ) as Effect.Effect<void>
       }
       case "Defect": {
+        entries.clear()
         return write({ _tag: "Defect", clientId: 0, defect: decodeDefect(message.defect) })
+      }
+      case "ClientProtocolError": {
+        const exit = Exit.fail(message.error)
+        return Effect.forEach(
+          entries.keys(),
+          (requestId) => {
+            entries.delete(requestId)
+            return write({ _tag: "Exit", clientId: 0, requestId, exit: exit as any })
+          }
+        )
       }
       default: {
         return Effect.void
@@ -618,8 +766,6 @@ export const make: <Rpcs extends Rpc.Any>(
 
   return client
 })
-
-const parseRequestId = (input: string | bigint): RequestId => typeof input === "string" ? BigInt(input) : input as any
 
 /**
  * @since 1.0.0
@@ -674,7 +820,7 @@ export class Protocol extends Context.Tag("@effect/rpc/RpcClient/Protocol")<Prot
   readonly send: (
     request: FromClientEncoded,
     transferables?: ReadonlyArray<globalThis.Transferable>
-  ) => Effect.Effect<void>
+  ) => Effect.Effect<void, RpcClientError>
   readonly supportsAck: boolean
   readonly supportsTransferables: boolean
 }>() {
@@ -697,23 +843,28 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
     const serialization = yield* RpcSerialization.RpcSerialization
     const isJson = serialization.contentType === "application/json"
 
-    const send = (request: FromClientEncoded): Effect.Effect<void> => {
+    const send = (request: FromClientEncoded): Effect.Effect<void, RpcClientError> => {
       if (request._tag !== "Request") {
         return Effect.void
       }
 
       const parser = serialization.unsafeMake()
-      if (!serialization.supportsBigInt) transformBigInt(request)
 
-      const encoded = parser.encode(request)
+      const encoded = parser.encode(request)!
       const body = typeof encoded === "string" ?
         HttpBody.text(encoded, serialization.contentType) :
         HttpBody.uint8Array(encoded, serialization.contentType)
 
       if (isJson) {
-        return client.post("/", { body }).pipe(
+        return client.post("", { body }).pipe(
           Effect.flatMap((r) => r.json),
-          Effect.scoped,
+          Effect.mapError((cause) =>
+            new RpcClientError({
+              reason: "Protocol",
+              message: "Failed to send HTTP request",
+              cause
+            })
+          ),
           Effect.flatMap((u) => {
             if (!Array.isArray(u)) {
               return Effect.dieMessage(`Expected an array of responses, but got: ${u}`)
@@ -724,12 +875,11 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
               body: () => writeResponse(u[i++]),
               step: constVoid
             })
-          }),
-          Effect.orDie
+          })
         )
       }
 
-      return client.post("/", { body }).pipe(
+      return client.post("", { body }).pipe(
         Effect.flatMap((r) =>
           Stream.runForEachChunk(r.stream, (chunk) => {
             const responses = Chunk.toReadonlyArray(chunk).flatMap(parser.decode) as Array<FromServerEncoded>
@@ -742,7 +892,13 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
             })
           })
         ),
-        Effect.orDie
+        Effect.mapError((cause) =>
+          new RpcClientError({
+            reason: "Protocol",
+            message: "Failed to send HTTP request",
+            cause
+          })
+        )
       )
     }
 
@@ -776,68 +932,136 @@ export const layerProtocolHttp = (options: {
  * @since 1.0.0
  * @category protocol
  */
-export const makeProtocolSocket: Effect.Effect<
+export const makeProtocolSocket = (options?: {
+  readonly retryTransientErrors?: boolean | undefined
+}): Effect.Effect<
   Protocol["Type"],
   never,
   Scope.Scope | RpcSerialization.RpcSerialization | Socket.Socket
-> = Protocol.make(Effect.fnUntraced(function*(writeResponse) {
-  const socket = yield* Socket.Socket
-  const serialization = yield* RpcSerialization.RpcSerialization
+> =>
+  Protocol.make(Effect.fnUntraced(function*(writeResponse) {
+    const socket = yield* Socket.Socket
+    const serialization = yield* RpcSerialization.RpcSerialization
+    const write = yield* socket.writer
+    let parser = serialization.unsafeMake()
+    const pinger = yield* makePinger(write(parser.encode(constPing)!))
 
-  const write = yield* socket.writer
-
-  let parser = serialization.unsafeMake()
-
-  yield* Effect.suspend(() => {
-    parser = serialization.unsafeMake()
-    return socket.runRaw((message) => {
-      try {
-        const responses = parser.decode(message) as Array<FromServerEncoded>
-        if (responses.length === 0) return
-        let i = 0
-        return Effect.whileLoop({
-          while: () => i < responses.length,
-          body: () => writeResponse(responses[i++]),
-          step: constVoid
-        })
-      } catch (defect) {
-        return writeResponse({ _tag: "Defect", defect })
-      }
+    let currentError: RpcClientError | undefined
+    const clearCurrentError = Effect.sync(() => {
+      currentError = undefined
     })
-  }).pipe(
-    Effect.zipRight(Effect.fail(
-      new Socket.SocketCloseError({
-        reason: "Close",
-        code: 1000
-      })
-    )),
-    Effect.tapErrorCause((cause) => writeResponse({ _tag: "Defect", defect: Cause.squash(cause) })),
-    Effect.retry(Schedule.spaced(1000)),
-    Effect.annotateLogs({
-      module: "RpcClient",
-      method: "makeProtocolSocket"
-    }),
-    Effect.interruptible,
-    Effect.forkScoped
-  )
 
-  yield* Effect.suspend(() => write(parser.encode(constPing))).pipe(
-    Effect.delay("30 seconds"),
+    yield* Effect.suspend(() => {
+      parser = serialization.unsafeMake()
+      pinger.reset()
+      return socket.runRaw((message) => {
+        try {
+          const responses = parser.decode(message) as Array<FromServerEncoded>
+          if (responses.length === 0) return
+          let i = 0
+          return Effect.whileLoop({
+            while: () => i < responses.length,
+            body: () => {
+              const response = responses[i++]
+              if (response._tag === "Pong") {
+                pinger.onPong()
+              }
+              return writeResponse(response)
+            },
+            step: constVoid
+          })
+        } catch (defect) {
+          return writeResponse({
+            _tag: "ClientProtocolError",
+            error: new RpcClientError({
+              reason: "Protocol",
+              message: "Error decoding message",
+              cause: Cause.fail(defect)
+            })
+          })
+        }
+      }, { onOpen: clearCurrentError }).pipe(
+        Effect.raceFirst(Effect.zipRight(
+          pinger.timeout,
+          Effect.fail(
+            new Socket.SocketGenericError({
+              reason: "OpenTimeout",
+              cause: new Error("ping timeout")
+            })
+          )
+        ))
+      )
+    }).pipe(
+      Effect.zipRight(Effect.fail(
+        new Socket.SocketCloseError({
+          reason: "Close",
+          code: 1000
+        })
+      )),
+      Effect.tapErrorCause((cause) => {
+        const error = Cause.failureOption(cause)
+        if (
+          options?.retryTransientErrors && Option.isSome(error) &&
+          (error.value.reason === "Open" || error.value.reason === "OpenTimeout")
+        ) {
+          return Effect.void
+        }
+        currentError = new RpcClientError({
+          reason: "Protocol",
+          message: "Error in socket",
+          cause: Cause.squash(cause)
+        })
+        return writeResponse({
+          _tag: "ClientProtocolError",
+          error: currentError
+        })
+      }),
+      Effect.retry(Schedule.spaced(1000)),
+      Effect.annotateLogs({
+        module: "RpcClient",
+        method: "makeProtocolSocket"
+      }),
+      Effect.interruptible,
+      Effect.forkScoped
+    )
+
+    return {
+      send(request) {
+        if (currentError) {
+          return Effect.fail(currentError)
+        }
+        const encoded = parser.encode(request)
+        if (encoded === undefined) return Effect.void
+        return Effect.orDie(write(encoded))
+      },
+      supportsAck: true,
+      supportsTransferables: false
+    }
+  }))
+
+const makePinger = Effect.fnUntraced(function*<A, E, R>(writePing: Effect.Effect<A, E, R>) {
+  let recievedPong = true
+  const latch = Effect.unsafeMakeLatch()
+  const reset = () => {
+    recievedPong = true
+    latch.unsafeClose()
+  }
+  const onPong = () => {
+    recievedPong = true
+  }
+  yield* Effect.suspend(() => {
+    if (!recievedPong) return latch.open
+    recievedPong = false
+    return writePing
+  }).pipe(
+    Effect.delay("10 seconds"),
     Effect.ignore,
     Effect.forever,
     Effect.interruptible,
     Effect.forkScoped
   )
-
-  return {
-    send(request) {
-      if (!serialization.supportsBigInt) transformBigInt(request)
-      return Effect.orDie(write(parser.encode(request)))
-    },
-    supportsAck: true,
-    supportsTransferables: false
-  }
-}))
+  return { timeout: latch.await, reset, onPong } as const
+})
 
 /**
  * @since 1.0.0
@@ -866,19 +1090,10 @@ export const makeProtocolWorker = (
     let workerId = 0
     const initialMessage = yield* Effect.serviceOption(RpcWorker.InitialMessage)
 
-    const entries = new Map<string | bigint, {
+    const entries = new Map<string, {
       readonly worker: Worker.BackingWorker<FromClientEncoded | RpcWorker.InitialMessage.Encoded, FromServerEncoded>
-      readonly scope: Scope.CloseableScope
+      readonly latch: Effect.Latch
     }>()
-
-    yield* Scope.addFinalizerExit(
-      scope,
-      (exit) =>
-        Effect.forEach(entries, ([_, entry]) => Scope.close(entry.scope, exit), {
-          discard: true,
-          concurrency: "unbounded"
-        })
-    )
 
     const acquire = Effect.gen(function*() {
       const id = workerId++
@@ -894,20 +1109,28 @@ export const makeProtocolWorker = (
           const entry = entries.get(response.requestId)
           if (entry) {
             entries.delete(response.requestId)
-            return Effect.ensuring(writeResponse(response), Scope.close(entry.scope, Exit.void))
+            entry.latch.unsafeOpen()
+            return writeResponse(response)
           }
         } else if (response._tag === "Defect") {
-          return Effect.zipRight(
-            Effect.forEach(entries, ([requestId, entry]) => {
-              entries.delete(requestId)
-              return Scope.close(entry.scope, Exit.die(response.defect))
-            }, { discard: true }),
-            writeResponse(response)
-          )
+          for (const [requestId, entry] of entries) {
+            entries.delete(requestId)
+            entry.latch.unsafeOpen()
+          }
+          return writeResponse(response)
         }
         return writeResponse(response)
       }).pipe(
-        Effect.tapErrorCause((cause) => writeResponse({ _tag: "Defect", defect: Cause.squash(cause) })),
+        Effect.tapErrorCause((cause) =>
+          writeResponse({
+            _tag: "ClientProtocolError",
+            error: new RpcClientError({
+              reason: "Protocol",
+              message: "Error in worker",
+              cause: Cause.squash(cause)
+            })
+          })
+        ),
         Effect.retry(Schedule.spaced(1000)),
         Effect.annotateLogs({
           module: "RpcClient",
@@ -943,16 +1166,26 @@ export const makeProtocolWorker = (
         targetUtilization: options.targetUtilization
       })
 
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.sync(() => {
+        for (const entry of entries.values()) {
+          entry.latch.unsafeOpen()
+        }
+        entries.clear()
+      })
+    )
+
     const send = (request: FromClientEncoded, transferables?: ReadonlyArray<globalThis.Transferable>) => {
       switch (request._tag) {
         case "Request": {
-          return Scope.make().pipe(
-            Effect.flatMap((scope) =>
-              Effect.flatMap(Scope.extend(pool.get, scope), (worker) => {
-                entries.set(request.id, { worker, scope })
-                return Effect.orDie(worker.send(request, transferables))
-              })
-            ),
+          return pool.get.pipe(
+            Effect.flatMap((worker) => {
+              const latch = Effect.unsafeMakeLatch(false)
+              entries.set(request.id, { worker, latch })
+              return Effect.zipRight(worker.send(request, transferables), latch.await)
+            }),
+            Effect.scoped,
             Effect.orDie
           )
         }
@@ -960,10 +1193,8 @@ export const makeProtocolWorker = (
           const entry = entries.get(request.requestId)
           if (!entry) return Effect.void
           entries.delete(request.requestId)
-          return Effect.ensuring(
-            Effect.orDie(entry.worker.send(request)),
-            Scope.close(entry.scope, Exit.void)
-          )
+          entry.latch.unsafeOpen()
+          return Effect.orDie(entry.worker.send(request))
         }
         case "Ack": {
           const entry = entries.get(request.requestId)
@@ -1006,17 +1237,14 @@ export const layerProtocolWorker = (
  * @since 1.0.0
  * @category protocol
  */
-export const layerProtocolSocket: Layer.Layer<Protocol, never, Socket.Socket | RpcSerialization.RpcSerialization> =
-  Layer.scoped(Protocol, makeProtocolSocket)
+export const layerProtocolSocket = (options?: {
+  readonly retryTransientErrors?: boolean | undefined
+}): Layer.Layer<
+  Protocol,
+  never,
+  Socket.Socket | RpcSerialization.RpcSerialization
+> => Layer.scoped(Protocol, makeProtocolSocket(options))
 
 // internal
 
 const decodeDefect = Schema.decodeSync(Schema.Defect)
-
-const transformBigInt = (request: FromClientEncoded) => {
-  if (request._tag === "Request") {
-    ;(request as any).id = request.id.toString()
-  } else if ("requestId" in request) {
-    ;(request as any).requestId = request.requestId.toString()
-  }
-}

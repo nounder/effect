@@ -1,8 +1,8 @@
 import { describe, it } from "@effect/vitest"
+import { assertNone, assertSome, deepStrictEqual, strictEqual, throws } from "@effect/vitest/utils"
 import * as Equal from "effect/Equal"
 import { pipe } from "effect/Function"
 import * as Option from "effect/Option"
-import { assertNone, assertSome, deepStrictEqual, strictEqual, throws } from "effect/test/util"
 import * as Trie from "effect/Trie"
 
 describe("Trie", () => {
@@ -45,7 +45,7 @@ describe("Trie", () => {
     if (typeof window !== "undefined") {
       return
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { inspect } = require("node:util")
 
     const trie = pipe(
@@ -58,7 +58,7 @@ describe("Trie", () => {
   })
 
   it("iterable empty", () => {
-    const trie = pipe(Trie.empty<string>())
+    const trie = Trie.empty<string>()
 
     strictEqual(Trie.size(trie), 0)
     deepStrictEqual(Array.from(trie), [])

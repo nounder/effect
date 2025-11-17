@@ -1,7 +1,6 @@
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
 import type * as Fiber from "effect/Fiber"
 import * as FiberRef from "effect/FiberRef"
 import { constFalse, dual } from "effect/Function"
@@ -12,6 +11,7 @@ import { pipeArguments } from "effect/Pipeable"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schedule from "effect/Schedule"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type { NoExcessProperties, NoInfer } from "effect/Types"
 import * as Cookies from "../Cookies.js"
@@ -25,6 +25,17 @@ import * as TraceContext from "../HttpTraceContext.js"
 import * as UrlParams from "../UrlParams.js"
 import * as internalRequest from "./httpClientRequest.js"
 import * as internalResponse from "./httpClientResponse.js"
+
+const ATTR_HTTP_REQUEST_HEADER = (key: string): string => `http.request.header.${key}`
+const ATTR_HTTP_REQUEST_METHOD = "http.request.method"
+const ATTR_HTTP_RESPONSE_HEADER = (key: string): string => `http.response.header.${key}`
+const ATTR_HTTP_RESPONSE_STATUS_CODE = "http.response.status_code"
+const ATTR_SERVER_ADDRESS = "server.address"
+const ATTR_SERVER_PORT = "server.port"
+const ATTR_URL_FULL = "url.full"
+const ATTR_URL_PATH = "url.path"
+const ATTR_URL_SCHEME = "url.scheme"
+const ATTR_URL_QUERY = "url.query"
 
 /** @internal */
 export const TypeId: Client.TypeId = Symbol.for(
@@ -44,12 +55,12 @@ export const currentTracerDisabledWhen = globalValue(
 export const withTracerDisabledWhen = dual<
   (
     predicate: Predicate.Predicate<ClientRequest.HttpClientRequest>
-  ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
-  <A, E, R>(
-    effect: Effect.Effect<A, E, R>,
+  ) => <E, R>(self: Client.HttpClient.With<E, R>) => Client.HttpClient.With<E, R>,
+  <E, R>(
+    self: Client.HttpClient.With<E, R>,
     predicate: Predicate.Predicate<ClientRequest.HttpClientRequest>
-  ) => Effect.Effect<A, E, R>
->(2, (self, pred) => Effect.locally(self, currentTracerDisabledWhen, pred))
+  ) => Client.HttpClient.With<E, R>
+>(2, (self, pred) => transformResponse(self, Effect.locally(currentTracerDisabledWhen, pred)))
 
 /** @internal */
 export const currentTracerPropagation = globalValue(
@@ -61,12 +72,31 @@ export const currentTracerPropagation = globalValue(
 export const withTracerPropagation = dual<
   (
     enabled: boolean
-  ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
-  <A, E, R>(
-    effect: Effect.Effect<A, E, R>,
+  ) => <E, R>(self: Client.HttpClient.With<E, R>) => Client.HttpClient.With<E, R>,
+  <E, R>(
+    self: Client.HttpClient.With<E, R>,
     enabled: boolean
-  ) => Effect.Effect<A, E, R>
->(2, (self, enabled) => Effect.locally(self, currentTracerPropagation, enabled))
+  ) => Client.HttpClient.With<E, R>
+>(2, (self, enabled) => transformResponse(self, Effect.locally(currentTracerPropagation, enabled)))
+
+/** @internal */
+export const SpanNameGenerator = Context.Reference<Client.SpanNameGenerator>()(
+  "@effect/platform/HttpClient/SpanNameGenerator",
+  {
+    defaultValue: () => (request: ClientRequest.HttpClientRequest) => `http.client ${request.method}`
+  }
+)
+
+/** @internal */
+export const withSpanNameGenerator = dual<
+  (
+    f: (request: ClientRequest.HttpClientRequest) => string
+  ) => <E, R>(self: Client.HttpClient.With<E, R>) => Client.HttpClient.With<E, R>,
+  <E, R>(
+    self: Client.HttpClient.With<E, R>,
+    f: (request: ClientRequest.HttpClientRequest) => string
+  ) => Client.HttpClient.With<E, R>
+>(2, (self, f) => transformResponse(self, Effect.provideService(SpanNameGenerator, f)))
 
 const ClientProto = {
   [TypeId]: TypeId,
@@ -157,6 +187,11 @@ const responseRegistry = globalValue(
   }
 )
 
+const scopedRequests = globalValue(
+  "@effect/platform/HttpClient/scopedRequests",
+  () => new WeakMap<ClientRequest.HttpClientRequest, AbortController>()
+)
+
 /** @internal */
 export const make = (
   f: (
@@ -169,7 +204,8 @@ export const make = (
   makeWith((effect) =>
     Effect.flatMap(effect, (request) =>
       Effect.withFiberRuntime((fiber) => {
-        const controller = new AbortController()
+        const scopedController = scopedRequests.get(request)
+        const controller = scopedController ?? new AbortController()
         const urlResult = UrlParams.makeUrl(request.url, request.urlParams, request.hash)
         if (urlResult._tag === "Left") {
           return Effect.fail(new Error.RequestError({ request, reason: "InvalidUrl", cause: urlResult.left }))
@@ -178,8 +214,10 @@ export const make = (
         const tracerDisabled = !fiber.getFiberRef(FiberRef.currentTracerEnabled) ||
           fiber.getFiberRef(currentTracerDisabledWhen)(request)
         if (tracerDisabled) {
+          const effect = f(request, url, controller.signal, fiber)
+          if (scopedController) return effect
           return Effect.uninterruptibleMask((restore) =>
-            Effect.matchCauseEffect(restore(f(request, url, controller.signal, fiber)), {
+            Effect.matchCauseEffect(restore(effect), {
               onSuccess(response) {
                 responseRegistry.register(response, controller)
                 return Effect.succeed(new InterruptibleResponse(response, controller))
@@ -193,26 +231,27 @@ export const make = (
             })
           )
         }
+        const nameGenerator = Context.get(fiber.currentContext, SpanNameGenerator)
         return Effect.useSpan(
-          `http.client ${request.method}`,
+          nameGenerator(request),
           { kind: "client", captureStackTrace: false },
           (span) => {
-            span.attribute("http.request.method", request.method)
-            span.attribute("server.address", url.origin)
+            span.attribute(ATTR_HTTP_REQUEST_METHOD, request.method)
+            span.attribute(ATTR_SERVER_ADDRESS, url.origin)
             if (url.port !== "") {
-              span.attribute("server.port", +url.port)
+              span.attribute(ATTR_SERVER_PORT, +url.port)
             }
-            span.attribute("url.full", url.toString())
-            span.attribute("url.path", url.pathname)
-            span.attribute("url.scheme", url.protocol.slice(0, -1))
+            span.attribute(ATTR_URL_FULL, url.toString())
+            span.attribute(ATTR_URL_PATH, url.pathname)
+            span.attribute(ATTR_URL_SCHEME, url.protocol.slice(0, -1))
             const query = url.search.slice(1)
             if (query !== "") {
-              span.attribute("url.query", query)
+              span.attribute(ATTR_URL_QUERY, query)
             }
             const redactedHeaderNames = fiber.getFiberRef(Headers.currentRedactedNames)
             const redactedHeaders = Headers.redact(request.headers, redactedHeaderNames)
             for (const name in redactedHeaders) {
-              span.attribute(`http.request.header.${name}`, String(redactedHeaders[name]))
+              span.attribute(ATTR_HTTP_REQUEST_HEADER(name), String(redactedHeaders[name]))
             }
             request = fiber.getFiberRef(currentTracerPropagation)
               ? internalRequest.setHeaders(request, TraceContext.toHeaders(span))
@@ -222,17 +261,17 @@ export const make = (
                 Effect.withParentSpan(span),
                 Effect.matchCauseEffect({
                   onSuccess: (response) => {
-                    span.attribute("http.response.status_code", response.status)
+                    span.attribute(ATTR_HTTP_RESPONSE_STATUS_CODE, response.status)
                     const redactedHeaders = Headers.redact(response.headers, redactedHeaderNames)
                     for (const name in redactedHeaders) {
-                      span.attribute(`http.response.header.${name}`, String(redactedHeaders[name]))
+                      span.attribute(ATTR_HTTP_RESPONSE_HEADER(name), String(redactedHeaders[name]))
                     }
-
+                    if (scopedController) return Effect.succeed(response)
                     responseRegistry.register(response, controller)
                     return Effect.succeed(new InterruptibleResponse(response, controller))
                   },
                   onFailure(cause) {
-                    if (Cause.isInterrupted(cause)) {
+                    if (!scopedController && Cause.isInterrupted(cause)) {
                       controller.abort()
                     }
                     return Effect.failCause(cause)
@@ -306,12 +345,12 @@ class InterruptibleResponse implements ClientResponse.HttpClientResponse {
   get stream() {
     return Stream.suspend(() => {
       responseRegistry.unregister(this.original)
-      return Stream.ensuringWith(this.original.stream, (exit) => {
-        if (Exit.isInterrupted(exit)) {
+      return Stream.ensuring(
+        this.original.stream,
+        Effect.sync(() => {
           this.controller.abort()
-        }
-        return Effect.void
-      })
+        })
+      )
     })
   }
 
@@ -323,6 +362,22 @@ class InterruptibleResponse implements ClientResponse.HttpClientResponse {
     return this.original[Inspectable.NodeInspectSymbol]()
   }
 }
+
+/** @internal */
+export const withScope = <E, R>(
+  self: Client.HttpClient.With<E, R>
+): Client.HttpClient.With<E, R | Scope.Scope> =>
+  transform(
+    self,
+    (effect, request) => {
+      const controller = new AbortController()
+      scopedRequests.set(request, controller)
+      return Effect.zipRight(
+        Effect.scopeWith((scope) => Scope.addFinalizer(scope, Effect.sync(() => controller.abort()))),
+        effect
+      )
+    }
+  )
 
 export const {
   /** @internal */

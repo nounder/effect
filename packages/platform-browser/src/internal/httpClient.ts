@@ -156,7 +156,6 @@ export abstract class IncomingMessageImpl<E> extends Inspectable.Class
     if (this.cachedCookies) {
       return this.cachedCookies
     }
-    this.headers
     if (this._rawHeaders === undefined) {
       return Cookies.empty
     } else if (this._rawHeaders["set-cookie"] === undefined) {
@@ -244,10 +243,6 @@ export abstract class IncomingMessageImpl<E> extends Inspectable.Class
 
   _arrayBufferEffect: Effect.Effect<ArrayBuffer, E> | undefined
   get arrayBuffer(): Effect.Effect<ArrayBuffer, E> {
-    if (this.source.responseType !== "arraybuffer") {
-      return Effect.fail(this.onError(new globalThis.Error("xhr.responseType is not arraybuffer")))
-    }
-
     if (this._arrayBufferEffect) {
       return this._arrayBufferEffect
     }
@@ -274,7 +269,10 @@ export abstract class IncomingMessageImpl<E> extends Inspectable.Class
     }).pipe(
       Effect.map((response) => {
         if (typeof response === "string") {
-          return encoder.encode(response).buffer
+          const arr = encoder.encode(response)
+          return arr.byteLength !== arr.buffer.byteLength
+            ? arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength)
+            : arr.buffer
         }
         return response
       }),

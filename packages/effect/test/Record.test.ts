@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual } from "@effect/vitest/utils"
 import { Either, Number as Num, Option, pipe, Record } from "effect"
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual } from "effect/test/util"
 
 const symA = Symbol.for("a")
 const symB = Symbol.for("b")
@@ -372,6 +372,32 @@ describe("Record", () => {
 
     it("mapEntries", () => {
       deepStrictEqual(pipe(stringRecord, Record.mapEntries((a, key) => [key.toUpperCase(), a + 1])), { A: 2 })
+    })
+
+    describe("findFirst", () => {
+      it("refinement/predicate", () => {
+        const record = {
+          a: 1,
+          b: 2,
+          c: 1
+        }
+        deepStrictEqual(
+          pipe(record, Record.findFirst((v) => v < 2)),
+          Option.some(["a", 1])
+        )
+        deepStrictEqual(
+          pipe(record, Record.findFirst((v, k) => v < 2 && k !== "a")),
+          Option.some(["c", 1])
+        )
+        deepStrictEqual(
+          pipe(record, Record.findFirst((v) => v > 2)),
+          Option.none()
+        )
+        deepStrictEqual(
+          Record.findFirst(record, (v) => v < 2),
+          Option.some(["a", 1])
+        )
+      })
     })
   })
 })

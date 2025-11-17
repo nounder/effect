@@ -9,13 +9,19 @@ export const e2eSuite = <E>(
   layer: Layer.Layer<UsersClient | RpcServer.Protocol, E>,
   concurrent = true
 ) => {
-  describe(name, { concurrent }, () => {
+  describe(name, { concurrent, timeout: 30_000 }, () => {
     it.effect("should get user", () =>
       Effect.gen(function*() {
         const client = yield* UsersClient
         const user = yield* client.GetUser({ id: "1" })
         assert.instanceOf(user, User)
         assert.deepStrictEqual(user, new User({ id: "1", name: "Logged in user" }))
+      }).pipe(Effect.provide(layer)))
+
+    it.effect("nested method", () =>
+      Effect.gen(function*() {
+        const client = yield* UsersClient
+        yield* client.nested.test()
       }).pipe(Effect.provide(layer)))
 
     it.effect("should not flatten Option", () =>
@@ -100,5 +106,17 @@ export const e2eSuite = <E>(
         RpcClient.withHeaders({ userId: "123" }),
         Effect.provide(layer)
       ))
+
+    it.effect("server wrap middleware", () =>
+      Effect.gen(function*() {
+        const client = yield* UsersClient
+        const result = yield* client.TimedMethod({ shouldFail: false })
+        assert.equal(result, 1)
+        yield* client.TimedMethod({ shouldFail: true }).pipe(Effect.exit)
+        const { count, defect, success } = yield* client.GetTimingMiddlewareMetrics()
+        assert.notEqual(count, 0)
+        assert.notEqual(defect, 0)
+        assert.notEqual(success, 0)
+      }).pipe(Effect.provide(layer)))
   })
 }

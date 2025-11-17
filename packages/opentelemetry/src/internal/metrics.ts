@@ -7,12 +7,13 @@ import type {
   Histogram,
   MetricCollectOptions,
   MetricData,
-  MetricDescriptor,
   MetricProducer,
   MetricReader
 } from "@opentelemetry/sdk-metrics"
 import { AggregationTemporality, DataPointType, InstrumentType } from "@opentelemetry/sdk-metrics"
+import type { InstrumentDescriptor } from "@opentelemetry/sdk-metrics/build/src/InstrumentDescriptor.js"
 import * as Arr from "effect/Array"
+import type { DurationInput } from "effect/Duration"
 import * as Effect from "effect/Effect"
 import type { LazyArg } from "effect/Function"
 import * as Layer from "effect/Layer"
@@ -24,6 +25,10 @@ import * as Option from "effect/Option"
 import * as Resource from "../Resource.js"
 
 const sdkName = "@effect/opentelemetry/Metrics"
+
+type MetricDataWithInstrumentDescriptor = MetricData & {
+  readonly descriptor: InstrumentDescriptor
+}
 
 /** @internal */
 export class MetricProducerImpl implements MetricProducer {
@@ -44,7 +49,7 @@ export class MetricProducerImpl implements MetricProducer {
     const hrTimeNow = currentHrTime()
     const metricData: Array<MetricData> = []
     const metricDataByName = new Map<string, MetricData>()
-    const addMetricData = (data: MetricData) => {
+    const addMetricData = (data: MetricDataWithInstrumentDescriptor) => {
       metricData.push(data)
       metricDataByName.set(data.descriptor.name, data)
     }
@@ -250,14 +255,15 @@ const descriptorMeta = (
   suffix?: string
 ) => ({
   name: suffix ? `${metricKey.name}_${suffix}` : metricKey.name,
-  description: Option.getOrElse(metricKey.description, () => "")
+  description: Option.getOrElse(metricKey.description, () => ""),
+  advice: {}
 })
 
 const descriptorFromKey = (
   metricKey: MetricKey.MetricKey.Untyped,
   tags: Record<string, string>,
   suffix?: string
-): MetricDescriptor => ({
+): InstrumentDescriptor => ({
   ...descriptorMeta(metricKey, suffix),
   unit: tags.unit ?? tags.time_unit ?? "1",
   type: instrumentTypeFromKey(metricKey),
@@ -292,7 +298,10 @@ export const makeProducer = Effect.map(
 /** @internal */
 export const registerProducer = (
   self: MetricProducer,
-  metricReader: LazyArg<MetricReader | Arr.NonEmptyReadonlyArray<MetricReader>>
+  metricReader: LazyArg<MetricReader | Arr.NonEmptyReadonlyArray<MetricReader>>,
+  options?: {
+    readonly shutdownTimeout?: DurationInput | undefined
+  }
 ) =>
   Effect.acquireRelease(
     Effect.sync(() => {
@@ -302,16 +311,22 @@ export const registerProducer = (
       return readers
     }),
     (readers) =>
-      Effect.ignoreLogged(Effect.promise(() =>
+      Effect.promise(() =>
         Promise.all(
           readers.map((reader) => reader.shutdown())
         )
-      ))
+      ).pipe(
+        Effect.ignoreLogged,
+        Effect.interruptible,
+        Effect.timeoutOption(options?.shutdownTimeout ?? 3000)
+      )
   )
 
 /** @internal */
-export const layer = (evaluate: LazyArg<MetricReader | Arr.NonEmptyReadonlyArray<MetricReader>>) =>
+export const layer = (evaluate: LazyArg<MetricReader | Arr.NonEmptyReadonlyArray<MetricReader>>, options?: {
+  readonly shutdownTimeout?: DurationInput | undefined
+}) =>
   Layer.scopedDiscard(Effect.flatMap(
     makeProducer,
-    (producer) => registerProducer(producer, evaluate)
+    (producer) => registerProducer(producer, evaluate, options)
   ))

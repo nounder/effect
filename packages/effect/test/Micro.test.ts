@@ -1,5 +1,4 @@
 import { describe, it } from "@effect/vitest"
-import { Cause, Context, Effect, Either, Exit, Fiber, Micro, Option, pipe } from "effect"
 import {
   assertFalse,
   assertInclude,
@@ -7,7 +6,8 @@ import {
   assertTrue,
   deepStrictEqual,
   strictEqual
-} from "effect/test/util"
+} from "@effect/vitest/utils"
+import { Cause, Context, Effect, Either, Exit, Fiber, Micro, Option, pipe } from "effect"
 
 class ATag extends Context.Tag("ATag")<ATag, "A">() {}
 class TestError extends Micro.TaggedError("TestError") {}
@@ -856,6 +856,42 @@ describe.concurrent("Micro", () => {
           deepStrictEqual(_, {
             a: 1,
             b: "2"
+          })
+        })
+      ))
+    it.effect("does not bindTo __proto__", () =>
+      pipe(
+        Micro.succeed(1),
+        Micro.bindTo("__proto__"),
+        Micro.bind("x", () => Micro.succeed(2)),
+        Micro.tap((_) => {
+          deepStrictEqual(_, {
+            x: 2,
+            ["__proto__"]: 1
+          })
+        })
+      ))
+    it.effect("does not let __proto__", () =>
+      pipe(
+        Micro.Do,
+        Micro.let("__proto__", () => 1),
+        Micro.bind("x", () => Micro.succeed(2)),
+        Micro.tap((_) => {
+          deepStrictEqual(_, {
+            x: 2,
+            ["__proto__"]: 1
+          })
+        })
+      ))
+    it.effect("does not bind __proto__", () =>
+      pipe(
+        Micro.Do,
+        Micro.bind("__proto__", () => Micro.succeed(1)),
+        Micro.bind("x", () => Micro.succeed(2)),
+        Micro.tap((_) => {
+          deepStrictEqual(_, {
+            x: 2,
+            ["__proto__"]: 1
           })
         })
       ))

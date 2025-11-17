@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertLeft, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import * as Cause from "effect/Cause"
 import * as Chunk from "effect/Chunk"
 import * as Effect from "effect/Effect"
@@ -9,9 +10,7 @@ import * as Fiber from "effect/Fiber"
 import * as FiberId from "effect/FiberId"
 import { constFalse, constTrue, identity, pipe } from "effect/Function"
 import * as Option from "effect/Option"
-import { assertLeft, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
-import { causesArb } from "effect/test/utils/cause"
-import { assertType, satisfies } from "effect/test/utils/types"
+import { causesArb } from "../utils/cause.js"
 
 const ExampleError = new Error("Oh noes!")
 
@@ -269,7 +268,6 @@ describe("Effect", () => {
         Effect.exit
       )
       deepStrictEqual(result, Exit.fail({ _tag: "ErrorB" as const }))
-      satisfies<true>(assertType<Exit.Exit<ErrorA, ErrorB>>()(result))
     }))
   it.effect("catchTags - recovers from one of several tagged errors", () =>
     Effect.gen(function*() {

@@ -1,6 +1,14 @@
-import { assertType, describe, it } from "@effect/vitest"
+import { describe, it } from "@effect/vitest"
+import {
+  assertFalse,
+  assertNone,
+  assertSome,
+  assertTrue,
+  deepStrictEqual,
+  strictEqual,
+  throws
+} from "@effect/vitest/utils"
 import { Chunk, Either, Equal, Hash, Number as N, Option, pipe, String as S } from "effect"
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual, throws } from "effect/test/util"
 
 const gt2 = (n: number): boolean => n > 2
 
@@ -93,7 +101,7 @@ describe("Option", () => {
     if (typeof window !== "undefined") {
       return
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { inspect } = require("node:util")
     deepStrictEqual(inspect(Option.none()), inspect({ _id: "Option", _tag: "None" }))
     deepStrictEqual(inspect(Option.some(1)), inspect({ _id: "Option", _tag: "Some", value: 1 }))
@@ -465,16 +473,12 @@ describe("Option", () => {
   })
 
   it("all/ tuple", () => {
-    assertType<Option.Option<[number, string]>>(Option.all([Option.some(1), Option.some("hello")]))
     assertSome(Option.all([]), [])
     assertSome(Option.all([Option.some(1), Option.some("hello")]), [1, "hello"])
     assertNone(Option.all([Option.some(1), Option.none()]))
   })
 
   it("all/ iterable", () => {
-    assertType<Option.Option<Array<number>>>(Option.all([Option.some(1), Option.some(2)]))
-    assertType<Option.Option<Array<number>>>(Option.all(new Set([Option.some(1), Option.some(2)])))
-
     assertSome(Option.all([]), [])
     assertNone(Option.all([Option.none()]))
     assertSome(Option.all([Option.some(1), Option.some(2)]), [1, 2])
@@ -483,7 +487,6 @@ describe("Option", () => {
   })
 
   it("all/ struct", () => {
-    assertType<Option.Option<{ a: number; b: string }>>(Option.all({ a: Option.some(1), b: Option.some("hello") }))
     assertSome(
       Option.all({ a: Option.some(1), b: Option.some("hello") }),
       { a: 1, b: "hello" }
@@ -511,6 +514,14 @@ describe("Option", () => {
     it("bindTo", () => {
       assertSome(pipe(Option.some(1), Option.bindTo("a")), { a: 1 })
       assertNone(pipe(Option.none(), Option.bindTo("a")))
+      assertSome(
+        pipe(
+          Option.some(1),
+          Option.bindTo("__proto__"),
+          Option.bind("x", () => Option.some(2))
+        ),
+        { x: 2, ["__proto__"]: 1 }
+      )
     })
 
     it("bind", () => {
@@ -524,12 +535,30 @@ describe("Option", () => {
       assertNone(
         pipe(Option.none(), Option.bindTo("a"), Option.bind("b", () => Option.some(2)))
       )
+      assertSome(
+        pipe(
+          Option.some(1),
+          Option.bindTo("a"),
+          Option.bind("__proto__", ({ a }) => Option.some(a + 1)),
+          Option.bind("b", ({ a }) => Option.some(a + 1))
+        ),
+        { a: 1, b: 2, ["__proto__"]: 2 }
+      )
     })
 
     it("let", () => {
       assertSome(pipe(Option.some(1), Option.bindTo("a"), Option.let("b", ({ a }) => a + 1)), { a: 1, b: 2 })
       assertNone(
         pipe(Option.none(), Option.bindTo("a"), Option.let("b", () => 2))
+      )
+      assertSome(
+        pipe(
+          Option.some(1),
+          Option.bindTo("a"),
+          Option.let("__proto__", ({ a }) => a + 1),
+          Option.let("b", ({ a }) => a + 1)
+        ),
+        { a: 1, b: 2, ["__proto__"]: 2 }
       )
     })
   })

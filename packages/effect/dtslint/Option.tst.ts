@@ -6,21 +6,21 @@ declare const string: Option.Option<string>
 declare const numberOrString: Option.Option<string | number>
 
 declare const primitiveNumber: number
-declare const primitiveNumerOrString: string | number
+declare const primitiveNumberOrString: string | number
 declare const predicateNumbersOrStrings: Predicate.Predicate<number | string>
 
 describe("Option", () => {
   it("liftPredicate", () => {
     expect(
-      Option.liftPredicate(primitiveNumerOrString, Predicate.isString)
+      Option.liftPredicate(primitiveNumberOrString, Predicate.isString)
     ).type.toBe<Option.Option<string>>()
     expect(
-      pipe(primitiveNumerOrString, Option.liftPredicate(Predicate.isString))
+      pipe(primitiveNumberOrString, Option.liftPredicate(Predicate.isString))
     ).type.toBe<Option.Option<string>>()
 
     expect(
       Option.liftPredicate(
-        primitiveNumerOrString,
+        primitiveNumberOrString,
         (n): n is number => {
           expect(n).type.toBe<string | number>()
           return typeof n === "number"
@@ -29,7 +29,7 @@ describe("Option", () => {
     ).type.toBe<Option.Option<number>>()
     expect(
       pipe(
-        primitiveNumerOrString,
+        primitiveNumberOrString,
         Option.liftPredicate(
           (n): n is number => {
             expect(n).type.toBe<string | number>()
@@ -184,12 +184,10 @@ describe("Option", () => {
 
   describe("firstSomeOf", () => {
     it("should error for invalid type parameter", () => {
-      Option.firstSomeOf<number>(
-        // @ts-expect-error: Type 'string' is not assignable to type 'number'
+      expect(Option.firstSomeOf<number>).type.not.toBeCallableWith(
         [number, string]
       )
-      pipe(
-        // @ts-expect-error: Type 'string' is not assignable to type 'number'
+      expect(pipe).type.not.toBeCallableWith(
         [number, string],
         Option.firstSomeOf<number>
       )

@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual } from "@effect/vitest/utils"
 import * as Cause from "effect/Cause"
 import * as Chunk from "effect/Chunk"
 import * as Deferred from "effect/Deferred"
@@ -7,7 +8,6 @@ import * as Exit from "effect/Exit"
 import { pipe } from "effect/Function"
 import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
-import { deepStrictEqual } from "effect/test/util"
 
 describe("Stream", () => {
   it.effect("buffer - maintains elements and ordering", () =>
@@ -176,11 +176,7 @@ describe("Stream", () => {
             yield* (Deferred.await(latch2))
             yield* pipe(
               pull,
-              Effect.flatMap((chunk) =>
-                pipe(
-                  Ref.update(ref, Chunk.appendAll(chunk))
-                )
-              ),
+              Effect.flatMap((chunk) => Ref.update(ref, Chunk.appendAll(chunk))),
               Effect.repeatN(7)
             )
             const result2 = yield* (Ref.get(ref))
@@ -358,11 +354,7 @@ describe("Stream", () => {
             yield* (Deferred.await(latch2))
             yield* pipe(
               pull,
-              Effect.flatMap((chunk) =>
-                pipe(
-                  Ref.update(ref, Chunk.appendAll(chunk))
-                )
-              ),
+              Effect.flatMap((chunk) => Ref.update(ref, Chunk.appendAll(chunk))),
               Effect.repeatN(7)
             )
             const result2 = yield* (Ref.get(ref))

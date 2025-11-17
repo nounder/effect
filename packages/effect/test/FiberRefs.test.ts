@@ -1,17 +1,15 @@
 import { describe, it } from "@effect/vitest"
+import { assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Cause, Effect, Exit, Fiber, FiberId, FiberRef, FiberRefs, HashMap, Option, pipe, Queue, Scope } from "effect"
-import { assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 describe("FiberRefs", () => {
   it.scoped("propagate FiberRef values across fiber boundaries", () =>
     Effect.gen(function*() {
       const fiberRef = yield* FiberRef.make(false)
       const queue = yield* Queue.unbounded<FiberRefs.FiberRefs>()
-      const producer = yield* pipe(
-        FiberRef.set(fiberRef, true).pipe(
-          Effect.zipRight(Effect.getFiberRefs.pipe(Effect.flatMap((a) => Queue.offer(queue, a)))),
-          Effect.fork
-        )
+      const producer = yield* FiberRef.set(fiberRef, true).pipe(
+        Effect.zipRight(Effect.getFiberRefs.pipe(Effect.flatMap((a) => Queue.offer(queue, a)))),
+        Effect.fork
       )
       const consumer = yield* pipe(
         Queue.take(queue),

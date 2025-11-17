@@ -9,6 +9,7 @@ import type * as Deferred from "./Deferred.js"
 import type * as Duration from "./Duration.js"
 import type * as Effect from "./Effect.js"
 import type * as Either from "./Either.js"
+import type { ExecutionPlan } from "./ExecutionPlan.js"
 import type * as Exit from "./Exit.js"
 import type { LazyArg } from "./Function.js"
 import type * as GroupBy from "./GroupBy.js"
@@ -3629,6 +3630,18 @@ export const provideContext: {
 } = internal.provideContext
 
 /**
+ * Provides the stream with some of its required context, which eliminates its
+ * dependency on `R`.
+ *
+ * @since 3.16.9
+ * @category context
+ */
+export const provideSomeContext: {
+  <R2>(context: Context.Context<R2>): <A, E, R>(self: Stream<A, E, R>) => Stream<A, E, Exclude<R, R2>>
+  <A, E, R, R2>(self: Stream<A, E, R>, context: Context.Context<R2>): Stream<A, E, Exclude<R, R2>>
+} = internal.provideSomeContext
+
+/**
  * Provides a `Layer` to the stream, which translates it to another level.
  *
  * @since 2.0.0
@@ -4063,11 +4076,33 @@ export const repeatWith: {
  * @category utils
  */
 export const retry: {
-  <E0 extends E, R2, E, X>(
-    schedule: Schedule.Schedule<X, E0, R2>
-  ): <A, R>(self: Stream<A, E, R>) => Stream<A, E, R2 | R>
-  <A, E, R, X, E0 extends E, R2>(self: Stream<A, E, R>, schedule: Schedule.Schedule<X, E0, R2>): Stream<A, E, R | R2>
+  <E, R2, X>(policy: Schedule.Schedule<X, NoInfer<E>, R2>): <A, R>(self: Stream<A, E, R>) => Stream<A, E, R2 | R>
+  <A, E, R, X, R2>(self: Stream<A, E, R>, policy: Schedule.Schedule<X, NoInfer<E>, R2>): Stream<A, E, R2 | R>
 } = internal.retry
+
+/**
+ * Apply an `ExecutionPlan` to the stream, which allows you to fallback to
+ * different resources in case of failure.
+ *
+ * If you have a stream that could fail with partial results, you can use
+ * the `preventFallbackOnPartialStream` option to prevent contamination of
+ * the final stream with partial results.
+ *
+ * @since 3.16.0
+ * @category Error handling
+ * @experimental
+ */
+export const withExecutionPlan: {
+  <Input, R2, Provides, PolicyE>(
+    policy: ExecutionPlan<{ provides: Provides; input: Input; error: PolicyE; requirements: R2 }>,
+    options?: { readonly preventFallbackOnPartialStream?: boolean | undefined }
+  ): <A, E extends Input, R>(self: Stream<A, E, R>) => Stream<A, E | PolicyE, R2 | Exclude<R, Provides>>
+  <A, E extends Input, R, R2, Input, Provides, PolicyE>(
+    self: Stream<A, E, R>,
+    policy: ExecutionPlan<{ provides: Provides; input: Input; error: PolicyE; requirements: R2 }>,
+    options?: { readonly preventFallbackOnPartialStream?: boolean | undefined }
+  ): Stream<A, E | PolicyE, R2 | Exclude<R, Provides>>
+} = internal.withExecutionPlan
 
 /**
  * Runs the sink on the stream to produce either the sink's result or an error.
@@ -5331,6 +5366,34 @@ export const toReadableStreamRuntime: {
     options?: { readonly strategy?: QueuingStrategy<A> | undefined }
   ): ReadableStream<A>
 } = internal.toReadableStreamRuntime
+
+/**
+ * Converts the stream to a `AsyncIterable` using the provided runtime.
+ *
+ * @since 3.15.0
+ * @category destructors
+ */
+export const toAsyncIterableRuntime: {
+  <A, XR>(runtime: Runtime<XR>): <E, R extends XR>(self: Stream<A, E, R>) => AsyncIterable<A>
+  <A, E, XR, R extends XR>(self: Stream<A, E, R>, runtime: Runtime<XR>): AsyncIterable<A>
+} = internal.toAsyncIterableRuntime
+
+/**
+ * Converts the stream to a `AsyncIterable` capturing the required dependencies.
+ *
+ * @since 3.15.0
+ * @category destructors
+ */
+export const toAsyncIterableEffect: <A, E, R>(self: Stream<A, E, R>) => Effect.Effect<AsyncIterable<A>, never, R> =
+  internal.toAsyncIterableEffect
+
+/**
+ * Converts the stream to a `AsyncIterable`.
+ *
+ * @since 3.15.0
+ * @category destructors
+ */
+export const toAsyncIterable: <A, E>(self: Stream<A, E>) => AsyncIterable<A> = internal.toAsyncIterable
 
 /**
  * Applies the transducer to the stream and emits its outputs.

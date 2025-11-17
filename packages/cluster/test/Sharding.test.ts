@@ -2,14 +2,28 @@ import {
   MessageStorage,
   RunnerAddress,
   Runners,
+  RunnerStorage,
   Sharding,
   ShardingConfig,
-  ShardManager,
-  ShardStorage,
   Snowflake
 } from "@effect/cluster"
 import { assert, describe, expect, it } from "@effect/vitest"
-import { Array, Cause, Chunk, Effect, Exit, Fiber, FiberId, Layer, Mailbox, Option, Stream, TestClock } from "effect"
+import {
+  Array,
+  Cause,
+  Chunk,
+  Effect,
+  Exit,
+  Fiber,
+  FiberId,
+  Layer,
+  Mailbox,
+  MutableRef,
+  Option,
+  Stream,
+  TestClock
+} from "effect"
+import * as RunnerHealth from "../src/RunnerHealth.js"
 import { TestEntity, TestEntityNoState, TestEntityState, User } from "./TestEntity.js"
 
 describe.concurrent("Sharding", () => {
@@ -77,19 +91,18 @@ describe.concurrent("Sharding", () => {
 
       yield* Effect.gen(function*() {
         const makeClient = yield* TestEntity.client
-        yield* TestClock.adjust(1)
         const client = makeClient("1")
         const fiber = yield* client.NeverVolatile().pipe(Effect.fork)
         yield* TestClock.adjust(1)
         const config = yield* ShardingConfig.ShardingConfig
         ;(config as any).runnerAddress = Option.some(RunnerAddress.make("localhost", 1234))
-        setTimeout(() => {
+        fiber.currentScheduler.scheduleTask(() => {
           fiber.unsafeInterruptAsFork(FiberId.none)
           Effect.runFork(testClock.adjust(30000))
         }, 0)
       }).pipe(
         Effect.provide(TestShardingWithoutRunners.pipe(
-          Layer.provide(Layer.effect(
+          Layer.provide(Layer.scoped(
             Runners.Runners,
             Effect.gen(function*() {
               const runners = yield* Runners.makeNoop
@@ -351,10 +364,7 @@ describe.concurrent("Sharding", () => {
       // add response
       yield* state.messages.offer(void 0)
 
-      yield* Effect.gen(function*() {
-        // Let the shards get assigned and storage poll
-        yield* TestClock.adjust(5000)
-      }).pipe(
+      yield* TestClock.adjust(5000).pipe(
         Effect.provide(EnvLayer),
         Effect.scoped
       )
@@ -465,12 +475,37 @@ describe.concurrent("Sharding", () => {
       const driver = yield* MessageStorage.MemoryDriver
       const makeClient = yield* TestEntity.client
       const client = makeClient("1")
-      const result = yield* client.Never({}, { discard: true })
+      const result = yield* client.Never(void 0, { discard: true })
       expect(result).toEqual(void 0)
       yield* TestClock.adjust(1)
       expect(driver.journal.length).toEqual(1)
       // should still be processing
       expect(driver.unprocessed.size).toEqual(1)
+    }).pipe(Effect.provide(TestSharding)))
+
+  it.scoped("defect when no MessageStorage", () =>
+    Effect.gen(function*() {
+      const makeClient = yield* TestEntity.client
+      const client = makeClient("1")
+      const cause = yield* client.Never().pipe(
+        Effect.sandbox,
+        Effect.flip
+      )
+      assert(Cause.isDie(cause))
+    }).pipe(Effect.provide(TestShardingWithoutStorage.pipe(
+      Layer.provide(MessageStorage.layerNoop)
+    ))))
+
+  it.scoped("restart on defect", () =>
+    Effect.gen(function*() {
+      yield* TestClock.adjust(1)
+      const state = yield* TestEntityState
+      const makeClient = yield* TestEntity.client
+      const client = makeClient("1")
+      MutableRef.set(state.defectTrigger, true)
+      const result = yield* client.GetUser({ id: 123 })
+      expect(result).toEqual(new User({ id: 123, name: "User 123" }))
+      expect(state.layerBuilds.current).toEqual(2)
     }).pipe(Effect.provide(TestSharding)))
 })
 
@@ -483,8 +518,8 @@ const TestShardingConfig = ShardingConfig.layer({
 
 const TestShardingWithoutState = TestEntityNoState.pipe(
   Layer.provideMerge(Sharding.layer),
-  Layer.provide(ShardManager.layerClientLocal),
-  Layer.provide(ShardStorage.layerMemory)
+  Layer.provide(RunnerStorage.layerMemory),
+  Layer.provide(RunnerHealth.layerNoop)
   // Layer.provide(Logger.minimumLogLevel(LogLevel.All)),
   // Layer.provideMerge(Logger.pretty)
 )

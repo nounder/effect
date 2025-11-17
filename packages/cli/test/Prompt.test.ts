@@ -1,7 +1,5 @@
 import type * as CliApp from "@effect/cli/CliApp"
 import * as Prompt from "@effect/cli/Prompt"
-import * as MockConsole from "@effect/cli/test/services/MockConsole"
-import * as MockTerminal from "@effect/cli/test/services/MockTerminal"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import * as Ansi from "@effect/printer-ansi/Ansi"
 import * as Doc from "@effect/printer-ansi/AnsiDoc"
@@ -11,6 +9,8 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
+import * as MockConsole from "./services/MockConsole.js"
+import * as MockTerminal from "./services/MockTerminal.js"
 
 const MainLive = Effect.gen(function*() {
   const console = yield* MockConsole.make
@@ -340,6 +340,39 @@ describe("Prompt", () => {
 
         expect(result).toEqual(2)
       }).pipe(runEffect))
+
+    it("should honor a single default selected choice", () =>
+      Effect.gen(function*() {
+        const prompt = Prompt.select({
+          message: "Select an option",
+          choices: [
+            { title: "Option 1", value: 1 },
+            { title: "Option 2", value: 2, selected: true },
+            { title: "Option 3", value: 3 }
+          ]
+        })
+
+        const fiber = yield* Effect.fork(prompt)
+        // Immediately submit without navigation
+        yield* MockTerminal.inputKey("enter")
+        const result = yield* Fiber.join(fiber)
+
+        expect(result).toEqual(2)
+      }).pipe(runEffect))
+
+    it("should throw if multiple default selected choices are provided", () =>
+      Effect.gen(function*() {
+        expect(() =>
+          Prompt.select({
+            message: "Select an option",
+            choices: [
+              { title: "Option 1", value: 1, selected: true },
+              { title: "Option 2", value: 2, selected: true },
+              { title: "Option 3", value: 3 }
+            ]
+          })
+        ).toThrow()
+      }).pipe(runEffect))
   })
 
   describe("Prompt.selectMulti", () => {
@@ -427,6 +460,25 @@ describe("Prompt", () => {
         const result = yield* Fiber.join(fiber)
 
         expect(result).toEqual(["A"])
+      }).pipe(runEffect))
+
+    it("should preselect choices marked with selected: true", () =>
+      Effect.gen(function*() {
+        const prompt = Prompt.multiSelect({
+          message: "Select multiple options",
+          choices: [
+            { title: "Option A", value: "A", selected: true },
+            { title: "Option B", value: "B", selected: true },
+            { title: "Option C", value: "C" }
+          ]
+        })
+
+        const fiber = yield* Effect.fork(prompt)
+        // Immediately submit without any navigation or toggling
+        yield* MockTerminal.inputKey("enter")
+        const result = yield* Fiber.join(fiber)
+
+        expect(result).toEqual(["A", "B"])
       }).pipe(runEffect))
   })
 })

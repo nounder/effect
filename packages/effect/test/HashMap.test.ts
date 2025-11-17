@@ -1,6 +1,14 @@
 import { describe, it } from "@effect/vitest"
+import {
+  assertFalse,
+  assertNone,
+  assertSome,
+  assertTrue,
+  deepStrictEqual,
+  strictEqual,
+  throws
+} from "@effect/vitest/utils"
 import { Equal, Hash, HashMap as HM, Option, pipe } from "effect"
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual, throws } from "effect/test/util"
 
 class Key implements Equal.Equal {
   constructor(readonly n: number) {}
@@ -65,7 +73,7 @@ describe("HashMap", () => {
 
   it("inspect", () => {
     if (typeof window === "undefined") {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { inspect } = require("node:util")
       const map = HM.make([0, "a"])
       deepStrictEqual(inspect(map), inspect({ _id: "HashMap", values: [[0, "a"]] }))
@@ -84,6 +92,17 @@ describe("HashMap", () => {
 
     assertTrue(HM.hasHash(key(0), Hash.hash(key(0)))(map))
     assertFalse(HM.hasHash(key(1), Hash.hash(key(0)))(map))
+  })
+
+  it("hasBy", () => {
+    const map = HM.make([key(0), value("a")])
+
+    assertTrue(HM.hasBy(map, (v) => Equal.equals(v, value("a"))))
+    assertTrue(HM.hasBy(map, (_, k) => Equal.equals(k, key(0))))
+    assertTrue(pipe(map, HM.hasBy((v) => Equal.equals(v, value("a")))))
+    assertFalse(HM.hasBy(map, (v) => Equal.equals(v, value("b"))))
+    assertFalse(HM.hasBy(map, (_, k) => Equal.equals(k, key(1))))
+    assertFalse(pipe(map, HM.hasBy((v) => Equal.equals(v, value("b")))))
   })
 
   it("get", () => {
@@ -439,9 +458,20 @@ describe("HashMap", () => {
   })
 
   it("findFirst", () => {
-    const map1 = HM.make([key(0), value("a")], [key(1), value("bb")])
-    assertSome(HM.findFirst(map1, (_v, k) => k.n === 0), [key(0), value("a")])
-    assertSome(HM.findFirst(map1, (v, _k) => v.s === "bb"), [key(1), value("bb")])
-    assertNone(HM.findFirst(map1, (v, k) => k.n === 0 && v.s === "bb"))
+    const map = HM.make([key(0), value("a")], [key(1), value("bb")])
+    assertSome(HM.findFirst(map, (_v, k) => k.n === 0), [key(0), value("a")])
+    assertSome(HM.findFirst(map, (v, _k) => v.s === "bb"), [key(1), value("bb")])
+    assertNone(HM.findFirst(map, (v, k) => k.n === 0 && v.s === "bb"))
+  })
+
+  it("countBy", () => {
+    const map = HM.make([key(1), value("a")], [key(2), value("b")], [key(3), value("c")])
+    strictEqual(HM.countBy(map, (_v, k) => k.n % 2 === 1), 2)
+    strictEqual(HM.countBy(map, (v, k) => k.n % 2 === 1 && v.s === "a"), 1)
+    strictEqual(HM.countBy(map, (v, k) => k.n % 2 === 1 && v.s === "b"), 0)
+
+    strictEqual(pipe(map, HM.countBy((_v, k) => k.n % 2 === 1)), 2)
+    strictEqual(pipe(map, HM.countBy((v, k) => k.n % 2 === 1 && v.s === "a")), 1)
+    strictEqual(pipe(map, HM.countBy((v, k) => k.n % 2 === 1 && v.s === "b")), 0)
   })
 })

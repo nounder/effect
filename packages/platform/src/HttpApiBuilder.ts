@@ -7,13 +7,13 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Fiber from "effect/Fiber"
-import { identity } from "effect/Function"
+import { constFalse, identity } from "effect/Function"
 import { globalValue } from "effect/GlobalValue"
 import * as Layer from "effect/Layer"
-import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Option from "effect/Option"
 import * as ParseResult from "effect/ParseResult"
 import { type Pipeable, pipeArguments } from "effect/Pipeable"
+import type * as Predicate from "effect/Predicate"
 import type { ReadonlyRecord } from "effect/Record"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -37,6 +37,7 @@ import * as HttpRouter from "./HttpRouter.js"
 import * as HttpServer from "./HttpServer.js"
 import * as HttpServerRequest from "./HttpServerRequest.js"
 import * as HttpServerResponse from "./HttpServerResponse.js"
+import * as Multipart from "./Multipart.js"
 import * as OpenApi from "./OpenApi.js"
 import type { Path } from "./Path.js"
 import * as UrlParams from "./UrlParams.js"
@@ -106,7 +107,7 @@ export const httpApp: Effect.Effect<
 > = Effect.gen(function*() {
   const { api, context } = yield* HttpApi.Api
   const middleware = makeMiddlewareMap(api.middlewares, context)
-  const router = applyMiddleware(middleware, yield* Router.router)
+  const router = applyMiddleware(middleware, yield* HttpRouter.toHttpApp(yield* Router.router))
   const apiMiddlewareService = yield* Middleware
   const apiMiddleware = yield* apiMiddlewareService.retrieve
   const errorSchema = makeErrorSchema(api as any)
@@ -121,6 +122,36 @@ export const httpApp: Effect.Effect<
     )
   ) as any
 })
+
+/**
+ * @since 1.0.0
+ * @category constructors
+ */
+export const buildMiddleware: <Id extends string, Groups extends HttpApiGroup.HttpApiGroup.Any, E, R>(
+  api: HttpApi.HttpApi<Id, Groups, E, R>
+) => Effect.Effect<
+  (
+    effect: Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>
+  ) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown, never>
+> = Effect.fnUntraced(
+  function*<Id extends string, Groups extends HttpApiGroup.HttpApiGroup.Any, E, R>(
+    api: HttpApi.HttpApi<Id, Groups, E, R>
+  ) {
+    const context = yield* Effect.context<never>()
+    const middlewareMap = makeMiddlewareMap(api.middlewares, context)
+    const errorSchema = makeErrorSchema(api as any)
+    const encodeError = Schema.encodeUnknown(errorSchema)
+    return (effect: Effect.Effect<HttpServerResponse.HttpServerResponse, unknown>) =>
+      Effect.catchAllCause(
+        applyMiddleware(middlewareMap, effect),
+        (cause) =>
+          Effect.matchEffect(Effect.provide(encodeError(Cause.squash(cause)), context), {
+            onFailure: () => Effect.failCause(cause),
+            onSuccess: Effect.succeed
+          })
+      )
+  }
+)
 
 /**
  * Construct an http web handler from an `HttpApi` instance.
@@ -163,25 +194,12 @@ export const toWebHandler = <LA, LE>(
   readonly handler: (request: Request, context?: Context.Context<never> | undefined) => Promise<Response>
   readonly dispose: () => Promise<void>
 } => {
-  const runtime = ManagedRuntime.make(
-    Layer.mergeAll(layer, Router.Live, Middleware.layer),
-    options?.memoMap
-  )
-  let handlerCached: ((request: Request, context?: Context.Context<never> | undefined) => Promise<Response>) | undefined
-  const handlerPromise = Effect.gen(function*() {
-    const app = yield* httpApp
-    const rt = yield* runtime.runtimeEffect
-    const handler = HttpApp.toWebHandlerRuntime(rt)(options?.middleware ? options.middleware(app as any) as any : app)
-    handlerCached = handler
-    return handler
-  }).pipe(runtime.runPromise)
-  function handler(request: Request, context?: Context.Context<never> | undefined): Promise<Response> {
-    if (handlerCached !== undefined) {
-      return handlerCached(request, context)
-    }
-    return handlerPromise.then((handler) => handler(request, context))
-  }
-  return { handler, dispose: runtime.dispose } as const
+  const layerMerged = Layer.mergeAll(layer, Router.Live, Middleware.layer)
+  return HttpApp.toWebHandlerLayerWith(layerMerged, {
+    memoMap: options?.memoMap,
+    middleware: options?.middleware as any,
+    toHandler: (r) => Effect.provide(httpApp, r)
+  })
 }
 
 /**
@@ -219,7 +237,8 @@ export interface Handlers<
    */
   handle<Name extends HttpApiEndpoint.HttpApiEndpoint.Name<Endpoints>, R1>(
     name: Name,
-    handler: HttpApiEndpoint.HttpApiEndpoint.HandlerWithName<Endpoints, Name, E, R1>
+    handler: HttpApiEndpoint.HttpApiEndpoint.HandlerWithName<Endpoints, Name, E, R1>,
+    options?: { readonly uninterruptible?: boolean | undefined } | undefined
   ): Handlers<
     E,
     Provides,
@@ -241,7 +260,8 @@ export interface Handlers<
    */
   handleRaw<Name extends HttpApiEndpoint.HttpApiEndpoint.Name<Endpoints>, R1>(
     name: Name,
-    handler: HttpApiEndpoint.HttpApiEndpoint.HandlerResponseWithName<Endpoints, Name, E, R1>
+    handler: HttpApiEndpoint.HttpApiEndpoint.HandlerRawWithName<Endpoints, Name, E, R1>,
+    options?: { readonly uninterruptible?: boolean | undefined } | undefined
   ): Handlers<
     E,
     Provides,
@@ -284,7 +304,8 @@ export declare namespace Handlers {
   export type Item<E, R> = {
     readonly endpoint: HttpApiEndpoint.HttpApiEndpoint.Any
     readonly handler: HttpApiEndpoint.HttpApiEndpoint.Handler<any, E, R>
-    readonly withFullResponse: boolean
+    readonly withFullRequest: boolean
+    readonly uninterruptible: boolean
   }
 
   /**
@@ -378,7 +399,8 @@ const HandlersProto = {
   handle(
     this: Handlers<any, any, any, HttpApiEndpoint.HttpApiEndpoint.Any>,
     name: string,
-    handler: HttpApiEndpoint.HttpApiEndpoint.Handler<any, any, any>
+    handler: HttpApiEndpoint.HttpApiEndpoint.Handler<any, any, any>,
+    options?: { readonly uninterruptible?: boolean | undefined } | undefined
   ) {
     const endpoint = this.group.endpoints[name]
     return makeHandlers({
@@ -386,14 +408,16 @@ const HandlersProto = {
       handlers: Chunk.append(this.handlers, {
         endpoint,
         handler,
-        withFullResponse: false
+        withFullRequest: false,
+        uninterruptible: options?.uninterruptible ?? false
       }) as any
     })
   },
   handleRaw(
     this: Handlers<any, any, any, HttpApiEndpoint.HttpApiEndpoint.Any>,
     name: string,
-    handler: HttpApiEndpoint.HttpApiEndpoint.Handler<any, any, any>
+    handler: HttpApiEndpoint.HttpApiEndpoint.Handler<any, any, any>,
+    options?: { readonly uninterruptible?: boolean | undefined } | undefined
   ) {
     const endpoint = this.group.endpoints[name]
     return makeHandlers({
@@ -401,7 +425,8 @@ const HandlersProto = {
       handlers: Chunk.append(this.handlers, {
         endpoint,
         handler,
-        withFullResponse: true
+        withFullRequest: true,
+        uninterruptible: options?.uninterruptible ?? false
       }) as any
     })
   }
@@ -473,7 +498,8 @@ export const group = <
               (input) => Context.merge(context, input)
             )
           },
-          item.withFullResponse
+          item.withFullRequest,
+          item.uninterruptible
         ))
       }
       yield* router.concat(HttpRouter.fromIterable(routes))
@@ -517,7 +543,8 @@ export const handler = <
 
 const requestPayload = (
   request: HttpServerRequest.HttpServerRequest,
-  urlParams: ReadonlyRecord<string, string | Array<string>>
+  urlParams: ReadonlyRecord<string, string | Array<string>>,
+  multipartLimits: Option.Option<Multipart.withLimits.Options>
 ): Effect.Effect<
   unknown,
   never,
@@ -534,7 +561,10 @@ const requestPayload = (
   if (contentType.includes("application/json")) {
     return Effect.orDie(request.json)
   } else if (contentType.includes("multipart/form-data")) {
-    return Effect.orDie(request.multipart)
+    return Effect.orDie(Option.match(multipartLimits, {
+      onNone: () => request.multipart,
+      onSome: (limits) => Multipart.withLimits(request.multipart, limits)
+    }))
   } else if (contentType.includes("x-www-form-urlencoded")) {
     return Effect.map(Effect.orDie(request.urlParamsBody), UrlParams.toRecord)
   } else if (contentType.startsWith("text/")) {
@@ -615,11 +645,21 @@ const handlerToRoute = (
   endpoint_: HttpApiEndpoint.HttpApiEndpoint.Any,
   middleware: MiddlewareMap,
   handler: HttpApiEndpoint.HttpApiEndpoint.Handler<any, any, any>,
-  isFullResponse: boolean
+  isFullRequest: boolean,
+  uninterruptible: boolean
 ): HttpRouter.Route<any, any> => {
   const endpoint = endpoint_ as HttpApiEndpoint.HttpApiEndpoint.AnyWithProps
+  const isMultipartStream = endpoint.payloadSchema.pipe(
+    Option.map(({ ast }) => HttpApiSchema.getMultipartStream(ast) !== undefined),
+    Option.getOrElse(constFalse)
+  )
+  const multipartLimits = endpoint.payloadSchema.pipe(
+    Option.flatMapNullable(({ ast }) => HttpApiSchema.getMultipart(ast) || HttpApiSchema.getMultipartStream(ast))
+  )
   const decodePath = Option.map(endpoint.pathSchema, Schema.decodeUnknown)
-  const decodePayload = Option.map(endpoint.payloadSchema, Schema.decodeUnknown)
+  const decodePayload = isFullRequest || isMultipartStream
+    ? Option.none()
+    : Option.map(endpoint.payloadSchema, Schema.decodeUnknown)
   const decodeHeaders = Option.map(endpoint.headersSchema, Schema.decodeUnknown)
   const encodeSuccess = Schema.encode(makeSuccessSchema(endpoint.successSchema))
   return HttpRouter.makeRoute(
@@ -633,15 +673,20 @@ const handlerToRoute = (
         const httpRequest = Context.unsafeGet(context, HttpServerRequest.HttpServerRequest)
         const routeContext = Context.unsafeGet(context, HttpRouter.RouteContext)
         const urlParams = Context.unsafeGet(context, HttpServerRequest.ParsedSearchParams)
-        const request: any = {}
+        const request: any = { request: httpRequest }
         if (decodePath._tag === "Some") {
           request.path = yield* decodePath.value(routeContext.params)
         }
         if (decodePayload._tag === "Some") {
           request.payload = yield* Effect.flatMap(
-            requestPayload(httpRequest, urlParams),
+            requestPayload(httpRequest, urlParams, multipartLimits),
             decodePayload.value
           )
+        } else if (isMultipartStream) {
+          request.payload = Option.match(multipartLimits, {
+            onNone: () => httpRequest.multipartStream,
+            onSome: (limits) => Multipart.withLimitsStream(httpRequest.multipartStream, limits)
+          })
         }
         if (decodeHeaders._tag === "Some") {
           request.headers = yield* decodeHeaders.value(httpRequest.headers)
@@ -650,14 +695,13 @@ const handlerToRoute = (
           const schema = endpoint.urlParamsSchema.value
           request.urlParams = yield* Schema.decodeUnknown(schema)(normalizeUrlParams(urlParams, schema.ast))
         }
-        const response = isFullResponse
-          ? yield* handler(request)
-          : yield* Effect.flatMap(handler(request), encodeSuccess)
-        return response as HttpServerResponse.HttpServerResponse
+        const response = yield* handler(request)
+        return HttpServerResponse.isServerResponse(response) ? response : yield* encodeSuccess(response)
       }).pipe(
         Effect.catchIf(ParseResult.isParseError, HttpApiDecodeError.refailParseError)
       )
-    )
+    ),
+    { uninterruptible }
   )
 }
 
@@ -695,8 +739,8 @@ const makeSecurityMiddleware = (
     readonly effect: Record<string, (_: any) => Effect.Effect<any, any>>
   }
 ): Effect.Effect<any, any, any> => {
-  if (securityMiddlewareCache.has(entry.tag)) {
-    return securityMiddlewareCache.get(entry.tag)!
+  if (securityMiddlewareCache.has(entry)) {
+    return securityMiddlewareCache.get(entry)!
   }
 
   let effect: Effect.Effect<any, any, any> | undefined
@@ -709,7 +753,7 @@ const makeSecurityMiddleware = (
   if (effect === undefined) {
     effect = Effect.void
   }
-  securityMiddlewareCache.set(entry.tag, effect)
+  securityMiddlewareCache.set(entry, effect)
   return effect
 }
 
@@ -921,7 +965,7 @@ export const middleware: {
  */
 export const middlewareCors = (
   options?: {
-    readonly allowedOrigins?: ReadonlyArray<string> | undefined
+    readonly allowedOrigins?: ReadonlyArray<string> | Predicate.Predicate<string> | undefined
     readonly allowedMethods?: ReadonlyArray<string> | undefined
     readonly allowedHeaders?: ReadonlyArray<string> | undefined
     readonly exposedHeaders?: ReadonlyArray<string> | undefined

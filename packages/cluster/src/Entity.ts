@@ -2,9 +2,11 @@
  * @since 1.0.0
  */
 import type * as Rpc from "@effect/rpc/Rpc"
-import type * as RpcClient from "@effect/rpc/RpcClient"
+import * as RpcClient from "@effect/rpc/RpcClient"
 import * as RpcGroup from "@effect/rpc/RpcGroup"
+import * as RpcServer from "@effect/rpc/RpcServer"
 import * as Arr from "effect/Array"
+import type { Brand } from "effect/Brand"
 import type * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
@@ -12,20 +14,29 @@ import type { DurationInput } from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Exit from "effect/Exit"
+import { identity } from "effect/Function"
 import * as Hash from "effect/Hash"
 import * as Layer from "effect/Layer"
 import * as Mailbox from "effect/Mailbox"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
-import type { Scope } from "effect/Scope"
+import type * as Schedule from "effect/Schedule"
+import { Scope } from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type { AlreadyProcessingMessage, MailboxFull, PersistenceError } from "./ClusterError.js"
-import type { EntityAddress } from "./EntityAddress.js"
+import { ShardGroup } from "./ClusterSchema.js"
+import { EntityAddress } from "./EntityAddress.js"
+import type { EntityId } from "./EntityId.js"
 import { EntityType } from "./EntityType.js"
-import type * as Envelope from "./Envelope.js"
+import * as Envelope from "./Envelope.js"
+import { hashString } from "./internal/hash.js"
+import { ResourceMap } from "./internal/resourceMap.js"
 import type * as Reply from "./Reply.js"
-import type { RunnerAddress } from "./RunnerAddress.js"
+import { RunnerAddress } from "./RunnerAddress.js"
+import * as ShardId from "./ShardId.js"
 import type { Sharding } from "./Sharding.js"
+import { ShardingConfig } from "./ShardingConfig.js"
+import * as Snowflake from "./Snowflake.js"
 
 /**
  * @since 1.0.0
@@ -43,12 +54,15 @@ export type TypeId = typeof TypeId
  * @since 1.0.0
  * @category models
  */
-export interface Entity<in out Rpcs extends Rpc.Any> extends Equal.Equal {
+export interface Entity<
+  in out Type extends string,
+  in out Rpcs extends Rpc.Any
+> extends Equal.Equal {
   readonly [TypeId]: TypeId
   /**
    * The name of the entity type.
    */
-  readonly type: EntityType
+  readonly type: Type & Brand<"EntityType">
 
   /**
    * A RpcGroup definition for messages which represents the messaging protocol
@@ -57,30 +71,45 @@ export interface Entity<in out Rpcs extends Rpc.Any> extends Equal.Equal {
   readonly protocol: RpcGroup.RpcGroup<Rpcs>
 
   /**
+   * Get the shard group for the given EntityId.
+   */
+  getShardGroup(entityId: EntityId): string
+
+  /**
+   * Get the ShardId for the given EntityId.
+   */
+  getShardId(entityId: EntityId): Effect.Effect<ShardId.ShardId, never, Sharding>
+
+  /**
    * Annotate the entity with a value.
    */
-  annotate<I, S>(tag: Context.Tag<I, S>, value: S): Entity<Rpcs>
+  annotate<I, S>(tag: Context.Tag<I, S>, value: S): Entity<Type, Rpcs>
 
   /**
    * Annotate the Rpc's above this point with a value.
    */
-  annotateRpcs<I, S>(tag: Context.Tag<I, S>, value: S): Entity<Rpcs>
+  annotateRpcs<I, S>(tag: Context.Tag<I, S>, value: S): Entity<Type, Rpcs>
 
   /**
    * Annotate the entity with a context object.
    */
-  annotateContext<S>(context: Context.Context<S>): Entity<Rpcs>
+  annotateContext<S>(context: Context.Context<S>): Entity<Type, Rpcs>
 
   /**
    * Annotate the Rpc's above this point with a context object.
    */
-  annotateRpcsContext<S>(context: Context.Context<S>): Entity<Rpcs>
+  annotateRpcsContext<S>(context: Context.Context<S>): Entity<Type, Rpcs>
 
   /**
    * Create a client for this entity.
    */
   readonly client: Effect.Effect<
-    (entityId: string) => RpcClient.RpcClient<Rpcs, MailboxFull | AlreadyProcessingMessage | PersistenceError>,
+    (
+      entityId: string
+    ) => RpcClient.RpcClient.From<
+      Rpcs,
+      MailboxFull | AlreadyProcessingMessage | PersistenceError
+    >,
     never,
     Sharding
   >
@@ -99,6 +128,9 @@ export interface Entity<in out Rpcs extends Rpc.Any> extends Equal.Equal {
       readonly maxIdleTime?: DurationInput | undefined
       readonly concurrency?: number | "unbounded" | undefined
       readonly mailboxCapacity?: number | "unbounded" | undefined
+      readonly disableFatalDefects?: boolean | undefined
+      readonly defectRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
+      readonly spanAttributes?: Record<string, string> | undefined
     }
   ): Layer.Layer<
     never,
@@ -109,6 +141,8 @@ export interface Entity<in out Rpcs extends Rpc.Any> extends Equal.Equal {
     | Rpc.Middleware<Rpcs>
     | Sharding
   >
+
+  of<Handlers extends HandlersFrom<Rpcs>>(handlers: Handlers): Handlers
 
   /**
    * Create a Layer from an Entity.
@@ -135,11 +169,14 @@ export interface Entity<in out Rpcs extends Rpc.Any> extends Equal.Equal {
     options?: {
       readonly maxIdleTime?: DurationInput | undefined
       readonly mailboxCapacity?: number | "unbounded" | undefined
+      readonly disableFatalDefects?: boolean | undefined
+      readonly defectRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
+      readonly spanAttributes?: Record<string, string> | undefined
     }
   ): Layer.Layer<
     never,
     never,
-    | Exclude<RX, Scope | CurrentAddress>
+    | Exclude<RX, Scope | CurrentAddress | CurrentRunnerAddress>
     | R
     | Rpc.Context<Rpcs>
     | Rpc.Middleware<Rpcs>
@@ -150,7 +187,7 @@ export interface Entity<in out Rpcs extends Rpc.Any> extends Equal.Equal {
  * @since 1.0.0
  * @category models
  */
-export type Any = Entity<Rpc.Any>
+export type Any = Entity<string, Rpc.Any>
 
 /**
  * @since 1.0.0
@@ -159,7 +196,7 @@ export type Any = Entity<Rpc.Any>
 export type HandlersFrom<Rpc extends Rpc.Any> = {
   readonly [Current in Rpc as Current["_tag"]]: (
     envelope: Request<Current>
-  ) => RpcGroup.ResultFrom<Current> | Rpc.Fork<RpcGroup.ResultFrom<Current>>
+  ) => Rpc.ResultFrom<Current, any> | Rpc.Wrapper<Rpc.ResultFrom<Current, any>>
 }
 
 /**
@@ -170,23 +207,26 @@ export const isEntity = (u: unknown): u is Any => Predicate.hasProperty(u, TypeI
 
 const Proto = {
   [TypeId]: TypeId,
-  [Hash.symbol](this: Entity<any>): number {
+  [Hash.symbol](this: Entity<string, any>): number {
     return Hash.structure({ type: this.type })
   },
-  [Equal.symbol](this: Entity<any>, that: Equal.Equal): boolean {
+  [Equal.symbol](this: Entity<string, any>, that: Equal.Equal): boolean {
     return isEntity(that) && this.type === that.type
   },
-  annotate<I, S>(this: Entity<any>, tag: Context.Tag<I, S>, value: S) {
+  annotate<I, S>(this: Entity<string, any>, tag: Context.Tag<I, S>, value: S) {
     return fromRpcGroup(this.type, this.protocol.annotate(tag, value))
   },
-  annotateRpcs<I, S>(this: Entity<any>, tag: Context.Tag<I, S>, value: S) {
+  annotateRpcs<I, S>(this: Entity<string, any>, tag: Context.Tag<I, S>, value: S) {
     return fromRpcGroup(this.type, this.protocol.annotateRpcs(tag, value))
   },
-  annotateContext<S>(this: Entity<any>, context: Context.Context<S>) {
+  annotateContext<S>(this: Entity<string, any>, context: Context.Context<S>) {
     return fromRpcGroup(this.type, this.protocol.annotateContext(context))
   },
-  annotateRpcsContext<S>(this: Entity<any>, context: Context.Context<S>) {
+  annotateRpcsContext<S>(this: Entity<string, any>, context: Context.Context<S>) {
     return fromRpcGroup(this.type, this.protocol.annotateRpcsContext(context))
+  },
+  getShardId(this: Entity<string, any>, entityId: EntityId) {
+    return Effect.map(shardingTag, (sharding) => sharding.getShardId(entityId, this.getShardGroup(entityId)))
   },
   get client() {
     return shardingTag.pipe(
@@ -198,16 +238,20 @@ const Proto = {
     Handlers extends HandlersFrom<Rpcs>,
     RX = never
   >(
-    this: Entity<Rpcs>,
+    this: Entity<string, Rpcs>,
     build: Handlers | Effect.Effect<Handlers, never, RX>,
     options?: {
       readonly maxIdleTime?: DurationInput | undefined
       readonly concurrency?: number | "unbounded" | undefined
+      readonly mailboxCapacity?: number | "unbounded" | undefined
+      readonly disableFatalDefects?: boolean | undefined
+      readonly defectRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
+      readonly spanAttributes?: Record<string, string> | undefined
     }
   ): Layer.Layer<
     never,
     never,
-    | Exclude<RX, Scope | CurrentAddress>
+    | Exclude<RX, Scope | CurrentAddress | CurrentRunnerAddress>
     | RpcGroup.HandlersContext<Rpcs, Handlers>
     | Rpc.Context<Rpcs>
     | Rpc.Middleware<Rpcs>
@@ -221,15 +265,16 @@ const Proto = {
           options
         )
       ),
-      Layer.effectDiscard
+      Layer.scopedDiscard
     )
   },
+  of: identity,
   toLayerMailbox<
     Rpcs extends Rpc.Any,
     R,
     RX = never
   >(
-    this: Entity<Rpcs>,
+    this: Entity<string, Rpcs>,
     build:
       | ((
         mailbox: Mailbox.ReadonlyMailbox<Envelope.Request<Rpcs>>,
@@ -245,6 +290,10 @@ const Proto = {
       >,
     options?: {
       readonly maxIdleTime?: DurationInput | undefined
+      readonly mailboxCapacity?: number | "unbounded" | undefined
+      readonly disableFatalDefects?: boolean | undefined
+      readonly defectRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
+      readonly spanAttributes?: Record<string, string> | undefined
     }
   ) {
     const buildHandlers = Effect.gen(this, function*() {
@@ -310,20 +359,21 @@ const Proto = {
  * @since 1.0.0
  * @category constructors
  */
-export const fromRpcGroup = <Rpcs extends Rpc.Any>(
+export const fromRpcGroup = <const Type extends string, Rpcs extends Rpc.Any>(
   /**
    * The entity type name.
    */
-  type: string,
+  type: Type,
   /**
    * The schema definition for messages that the entity is capable of
    * processing.
    */
   protocol: RpcGroup.RpcGroup<Rpcs>
-): Entity<Rpcs> => {
+): Entity<Type, Rpcs> => {
   const self = Object.create(Proto)
   self.type = EntityType.make(type)
   self.protocol = protocol
+  self.getShardGroup = Context.get(protocol.annotations, ShardGroup)
   return self
 }
 
@@ -334,17 +384,17 @@ export const fromRpcGroup = <Rpcs extends Rpc.Any>(
  * @since 1.0.0
  * @category constructors
  */
-export const make = <Rpcs extends ReadonlyArray<Rpc.Any>>(
+export const make = <const Type extends string, Rpcs extends ReadonlyArray<Rpc.Any>>(
   /**
    * The entity type name.
    */
-  type: string,
+  type: Type,
   /**
    * The schema definition for messages that the entity is capable of
    * processing.
    */
   protocol: Rpcs
-): Entity<Rpcs[number]> => fromRpcGroup(type, RpcGroup.make(...protocol))
+): Entity<Type, Rpcs[number]> => fromRpcGroup(type, RpcGroup.make(...protocol))
 
 /**
  * A Context.Tag to access the current entity address.
@@ -436,3 +486,101 @@ export class Request<Rpc extends Rpc.Any> extends Data.Class<
 }
 
 const shardingTag = Context.GenericTag<Sharding, Sharding["Type"]>("@effect/cluster/Sharding")
+
+/**
+ * @since 1.0.0
+ * @category Testing
+ */
+export const makeTestClient: <Type extends string, Rpcs extends Rpc.Any, LA, LE, LR>(
+  entity: Entity<Type, Rpcs>,
+  layer: Layer.Layer<LA, LE, LR>
+) => Effect.Effect<
+  (entityId: string) => Effect.Effect<RpcClient.RpcClient<Rpcs>>,
+  LE,
+  Scope | ShardingConfig | Exclude<LR, Sharding> | Rpc.MiddlewareClient<Rpcs>
+> = Effect.fnUntraced(function*<Type extends string, Rpcs extends Rpc.Any, LA, LE, LR>(
+  entity: Entity<Type, Rpcs>,
+  layer: Layer.Layer<LA, LE, LR>
+) {
+  const config = yield* ShardingConfig
+  const makeShardId = (entityId: string) =>
+    ShardId.make(
+      entity.getShardGroup(entityId as EntityId),
+      (Math.abs(hashString(entityId) % config.shardsPerGroup)) + 1
+    )
+  const snowflakeGen = yield* Snowflake.makeGenerator
+  const runnerAddress = new RunnerAddress({ host: "localhost", port: 3000 })
+  const entityMap = new Map<string, {
+    readonly context: Context.Context<Rpc.Context<Rpcs> | Rpc.Middleware<Rpcs> | LR>
+    readonly concurrency: number | "unbounded"
+    readonly build: Effect.Effect<
+      Context.Context<Rpc.ToHandler<Rpcs>>,
+      never,
+      Scope | CurrentAddress
+    >
+  }>()
+  const sharding = shardingTag.of({
+    ...({} as Sharding["Type"]),
+    registerEntity: (entity, handlers, options) =>
+      Effect.contextWith((context) => {
+        entityMap.set(entity.type, {
+          context: context as any,
+          concurrency: options?.concurrency ?? 1,
+          build: entity.protocol.toHandlersContext(handlers).pipe(
+            Effect.provide(context.pipe(
+              Context.add(CurrentRunnerAddress, runnerAddress),
+              Context.omit(Scope)
+            ))
+          ) as any
+        })
+      })
+  })
+  yield* Layer.build(Layer.provide(layer, Layer.succeed(shardingTag, sharding)))
+  const entityEntry = entityMap.get(entity.type)
+  if (!entityEntry) {
+    return yield* Effect.dieMessage(`Entity.makeTestClient: ${entity.type} was not registered by layer`)
+  }
+
+  const map = yield* ResourceMap.make(Effect.fnUntraced(function*(entityId: string) {
+    const address = new EntityAddress({
+      entityType: entity.type,
+      entityId: entityId as EntityId,
+      shardId: makeShardId(entityId)
+    })
+    const handlers = yield* entityEntry.build.pipe(
+      Effect.provideService(CurrentAddress, address)
+    )
+
+    // eslint-disable-next-line prefer-const
+    let client!: Effect.Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<Rpcs, never>>>
+    const server = yield* RpcServer.makeNoSerialization(entity.protocol, {
+      concurrency: entityEntry.concurrency,
+      onFromServer(response) {
+        return client.write(response)
+      }
+    }).pipe(Effect.provide(handlers))
+
+    client = yield* RpcClient.makeNoSerialization(entity.protocol, {
+      supportsAck: true,
+      generateRequestId: () => snowflakeGen.unsafeNext() as any,
+      onFromClient({ message }) {
+        if (message._tag === "Request") {
+          return server.write(0, {
+            ...message,
+            payload: new Request({
+              ...message,
+              [Envelope.TypeId]: Envelope.TypeId,
+              address,
+              requestId: Snowflake.Snowflake(message.id),
+              lastSentChunk: Option.none()
+            }) as any
+          })
+        }
+        return server.write(0, message)
+      }
+    })
+    return client.client
+  }))
+
+  return (entityId: string) => map.get(entityId)
+})

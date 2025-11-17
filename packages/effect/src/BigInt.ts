@@ -3,7 +3,10 @@
  * It includes functions for basic arithmetic operations, as well as type class instances for
  * `Equivalence` and `Order`.
  *
+ * @module BigInt
  * @since 2.0.0
+ * @see {@link module:BigDecimal} for more similar operations on `BigDecimal` types
+ * @see {@link module:Number} for more similar operations on `number` types
  */
 
 import * as equivalence from "./Equivalence.js"
@@ -602,7 +605,7 @@ export const fromString = (s: string): Option.Option<bigint> => {
     return s.trim() === ""
       ? Option.none()
       : Option.some(BigInt(s))
-  } catch (_) {
+  } catch {
     return Option.none()
   }
 }
@@ -634,7 +637,7 @@ export const fromNumber = (n: number): Option.Option<bigint> => {
 
   try {
     return Option.some(BigInt(n))
-  } catch (_) {
+  } catch {
     return Option.none()
   }
 }

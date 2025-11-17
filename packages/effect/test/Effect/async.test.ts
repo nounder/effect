@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertNone, assertSome, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import * as Cause from "effect/Cause"
 import * as Chunk from "effect/Chunk"
 import * as Deferred from "effect/Deferred"
@@ -10,7 +11,6 @@ import { pipe } from "effect/Function"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Runtime from "effect/Runtime"
-import { assertNone, assertSome, deepStrictEqual, strictEqual } from "effect/test/util"
 
 describe("Effect", () => {
   it.effect("simple async must return", () =>
@@ -28,7 +28,7 @@ describe("Effect", () => {
       strictEqual(result, 42)
     }))
   if (typeof window === "undefined") {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const os = require("node:os")
     it.effect("deep asyncEffect doesn't block", () =>
       Effect.gen(function*() {

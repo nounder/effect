@@ -140,7 +140,12 @@ export const histogram = (key: MetricKey.MetricKey.Histogram): MetricHook.Metric
   const bounds = key.keyType.boundaries.values
   const size = bounds.length
   const values = new Uint32Array(size + 1)
-  const boundaries = new Float32Array(size)
+  // NOTE: while 64-bit floating point precision shoule be enough for any
+  // practical histogram boundary values, there is still a small chance that
+  // precision will be lost with very large / very small numbers. If we find
+  // that is the case, a more complex approach storing the histogram boundary
+  // values as a tuple of `[original: string, numeric: number]` may be warranted
+  const boundaries = new Float64Array(size)
   let count = 0
   let sum = 0
   let min = Number.MAX_VALUE
@@ -221,8 +226,8 @@ export const summary = (key: MetricKey.MetricKey.Summary): MetricHook.MetricHook
   let head = 0
   let count = 0
   let sum = 0
-  let min = Number.MAX_VALUE
-  let max = Number.MIN_VALUE
+  let min = 0
+  let max = 0
 
   // Just before the snapshot we filter out all values older than maxAge
   const snapshot = (now: number): ReadonlyArray<readonly [number, Option.Option<number>]> => {
@@ -245,7 +250,7 @@ export const summary = (key: MetricKey.MetricKey.Summary): MetricHook.MetricHook
       if (item != null) {
         const [t, v] = item
         const age = Duration.millis(now - t)
-        if (Duration.greaterThanOrEqualTo(age, Duration.zero) && age <= maxAge) {
+        if (Duration.greaterThanOrEqualTo(age, Duration.zero) && Duration.lessThanOrEqualTo(age, maxAge)) {
           builder.push(v)
         }
       }
@@ -264,14 +269,12 @@ export const summary = (key: MetricKey.MetricKey.Summary): MetricHook.MetricHook
       const target = head % maxSize
       values[target] = [timestamp, value] as const
     }
+
+    min = count === 0 ? value : Math.min(min, value)
+    max = count === 0 ? value : Math.max(max, value)
+
     count = count + 1
     sum = sum + value
-    if (value < min) {
-      min = value
-    }
-    if (value > max) {
-      max = value
-    }
   }
 
   return make({
@@ -391,7 +394,8 @@ const resolveQuantile = (
     }
     // Split into two chunks - the first chunk contains all elements of the same
     // value as the chunk head
-    const sameHead = Arr.span(rest_1, (n) => n <= rest_1[0])
+    const headValue = Arr.headNonEmpty(rest_1) // Get head value since rest_1 is non-empty
+    const sameHead = Arr.span(rest_1, (n) => n === headValue)
     // How many elements do we want to accept for this quantile
     const desired = quantile_1 * sampleCount_1
     // The error margin
@@ -417,12 +421,14 @@ const resolveQuantile = (
       rest_1 = rest_2
       continue
     }
-    // If we have too many elements, select the previous value and hand back the
-    // the rest as leftover
+    // If consuming this chunk leads to too many elements (rank is too high)
     if (candConsumed > desired + allowedError) {
+      const valueToReturn = Option.isNone(current_1)
+        ? Option.some(headValue)
+        : current_1
       return {
         quantile: quantile_1,
-        value: current_1,
+        value: valueToReturn,
         consumed: consumed_1,
         rest: rest_1
       }

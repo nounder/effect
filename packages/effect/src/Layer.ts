@@ -32,14 +32,17 @@ import * as fiberRuntime from "./internal/fiberRuntime.js"
 import * as internal from "./internal/layer.js"
 import * as circularLayer from "./internal/layer/circular.js"
 import * as query from "./internal/query.js"
+import { randomTag } from "./internal/random.js"
 import type { LogLevel } from "./LogLevel.js"
 import type * as Option from "./Option.js"
 import type { Pipeable } from "./Pipeable.js"
+import type * as Random from "./Random.js"
 import type * as Request from "./Request.js"
 import type * as Runtime from "./Runtime.js"
 import type * as Schedule from "./Schedule.js"
 import * as Scheduler from "./Scheduler.js"
 import type * as Scope from "./Scope.js"
+import type * as Stream from "./Stream.js"
 import type * as Tracer from "./Tracer.js"
 import type * as Types from "./Types.js"
 
@@ -269,7 +272,7 @@ export const die: (defect: unknown) => Layer<unknown> = internal.die
 export const dieSync: (evaluate: LazyArg<unknown>) => Layer<unknown> = internal.dieSync
 
 /**
- * Replaces the layer's output with `void` and includes the layer only for its
+ * Replaces the layer's output with `never` and includes the layer only for its
  * side-effects.
  *
  * @since 2.0.0
@@ -392,6 +395,62 @@ export const flatten: {
  * @category utils
  */
 export const fresh: <A, E, R>(self: Layer<A, E, R>) => Layer<A, E, R> = internal.fresh
+
+/**
+ * @since 3.17.0
+ * @category Testing
+ */
+export type PartialEffectful<A extends object> = Types.Simplify<
+  & {
+    [
+      K in keyof A as A[K] extends
+        | Effect.Effect<any, any, any>
+        | Stream.Stream<any, any, any>
+        | ((...args: any) => Effect.Effect<any, any, any> | Stream.Stream<any, any, any>) ? K
+        : never
+    ]?: A[K]
+  }
+  & {
+    [
+      K in keyof A as A[K] extends
+        | Effect.Effect<any, any, any>
+        | Stream.Stream<any, any, any>
+        | ((...args: any) => Effect.Effect<any, any, any> | Stream.Stream<any, any, any>) ? never
+        : K
+    ]: A[K]
+  }
+>
+
+/**
+ * Creates a mock layer for testing purposes. You can provide a partial
+ * implementation of the service, and any methods not provided will
+ * throw an `UnimplementedError` defect when called.
+ *
+ * **Example**
+ *
+ * ```ts
+ * import { Context, Effect, Layer } from "effect"
+ *
+ * class MyService extends Context.Tag("MyService")<
+ *   MyService,
+ *   {
+ *     one: Effect.Effect<number>
+ *     two(): Effect.Effect<number>
+ *   }
+ * >() {}
+ *
+ * const MyServiceTest = Layer.mock(MyService, {
+ *   two: () => Effect.succeed(2)
+ * })
+ * ```
+ *
+ * @since 3.17.0
+ * @category Testing
+ */
+export const mock: {
+  <I, S extends object>(tag: Context.Tag<I, S>): (service: PartialEffectful<S>) => Layer<I>
+  <I, S extends object>(tag: Context.Tag<I, S>, service: PartialEffectful<S>): Layer<I>
+} = internal.mock
 
 const fromFunction: <I1, S1, I2, S2>(
   tagA: Context.Tag<I1, S1>,
@@ -521,7 +580,7 @@ export const merge: {
  * @since 2.0.0
  * @category zipping
  */
-export const mergeAll: <Layers extends [Layer<never, any, any>, ...Array<Layer<never, any, any>>]>(
+export const mergeAll: <Layers extends readonly [Layer<never, any, any>, ...Array<Layer<never, any, any>>]>(
   ...layers: Layers
 ) => Layer<
   { [k in keyof Layers]: Layer.Success<Layers[k]> }[number],
@@ -841,7 +900,7 @@ export const provide: {
   <RIn, E, ROut>(
     that: Layer<ROut, E, RIn>
   ): <RIn2, E2, ROut2>(self: Layer<ROut2, E2, RIn2>) => Layer<ROut2, E | E2, RIn | Exclude<RIn2, ROut>>
-  <const Layers extends [Layer.Any, ...Array<Layer.Any>]>(
+  <const Layers extends readonly [Layer.Any, ...Array<Layer.Any>]>(
     that: Layers
   ): <A, E, R>(
     self: Layer<A, E, R>
@@ -855,7 +914,7 @@ export const provide: {
     self: Layer<ROut2, E2, RIn2>,
     that: Layer<ROut, E, RIn>
   ): Layer<ROut2, E | E2, RIn | Exclude<RIn2, ROut>>
-  <A, E, R, const Layers extends [Layer.Any, ...Array<Layer.Any>]>(
+  <A, E, R, const Layers extends readonly [Layer.Any, ...Array<Layer.Any>]>(
     self: Layer<A, E, R>,
     that: Layers
   ): Layer<
@@ -944,6 +1003,15 @@ export const setConfigProvider: (configProvider: ConfigProvider) => Layer<never>
  * @category tracing
  */
 export const parentSpan: (span: Tracer.AnySpan) => Layer<Tracer.ParentSpan> = circularLayer.parentSpan
+
+/**
+ * @since 3.15.0
+ * @category Random
+ */
+export const setRandom = <A extends Random.Random>(random: A): Layer<never> =>
+  scopedDiscard(
+    fiberRuntime.fiberRefLocallyScopedWith(defaultServices.currentServices, Context.add(randomTag, random))
+  )
 
 /**
  * @since 2.0.0
@@ -1048,6 +1116,17 @@ export const setUnhandledErrorLogLevel: (level: Option.Option<LogLevel>) => Laye
 ): Layer<never> =>
   scopedDiscard(
     fiberRuntime.fiberRefLocallyScoped(core.currentUnhandledErrorLogLevel, level)
+  )
+
+/**
+ * @since 3.17.0
+ * @category logging
+ */
+export const setVersionMismatchErrorLogLevel: (level: Option.Option<LogLevel>) => Layer<never> = (
+  level: Option.Option<LogLevel>
+): Layer<never> =>
+  scopedDiscard(
+    fiberRuntime.fiberRefLocallyScoped(core.currentVersionMismatchErrorLogLevel, level)
   )
 
 /**

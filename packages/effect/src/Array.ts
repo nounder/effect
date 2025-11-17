@@ -18,7 +18,7 @@ import * as Order from "./Order.js"
 import * as Predicate from "./Predicate.js"
 import * as Record from "./Record.js"
 import * as Tuple from "./Tuple.js"
-import type { NoInfer } from "./Types.js"
+import type { NoInfer, TupleOf } from "./Types.js"
 
 /**
  * @category type lambdas
@@ -1107,6 +1107,89 @@ export const findLast: {
 )
 
 /**
+ * Returns a tuple of the first element that satisfies the specified
+ * predicate and its index, or `None` if no such element exists.
+ *
+ * **Example**
+ *
+ * ```ts
+ * import { Array } from "effect"
+ *
+ * const result = Array.findFirstWithIndex([1, 2, 3, 4, 5], x => x > 3)
+ * console.log(result) // Option.some([4, 3])
+ * ```
+ *
+ * @category elements
+ * @since 3.17.0
+ */
+export const findFirstWithIndex: {
+  <A, B>(f: (a: NoInfer<A>, i: number) => Option.Option<B>): (self: Iterable<A>) => Option.Option<[B, number]>
+  <A, B extends A>(refinement: (a: NoInfer<A>, i: number) => a is B): (self: Iterable<A>) => Option.Option<[B, number]>
+  <A>(predicate: (a: NoInfer<A>, i: number) => boolean): (self: Iterable<A>) => Option.Option<[A, number]>
+  <A, B>(self: Iterable<A>, f: (a: A, i: number) => Option.Option<B>): Option.Option<[B, number]>
+  <A, B extends A>(self: Iterable<A>, refinement: (a: A, i: number) => a is B): Option.Option<[B, number]>
+  <A>(self: Iterable<A>, predicate: (a: A, i: number) => boolean): Option.Option<[A, number]>
+} = dual(
+  2,
+  <A>(
+    self: Iterable<A>,
+    f: ((a: A, i: number) => boolean) | ((a: A, i: number) => Option.Option<A>)
+  ): Option.Option<[A, number]> => {
+    let i = 0
+    for (const a of self) {
+      const o = f(a, i)
+      if (Predicate.isBoolean(o)) {
+        if (o) {
+          return Option.some([a, i])
+        }
+      } else {
+        if (Option.isSome(o)) {
+          return Option.some([o.value, i])
+        }
+      }
+      i++
+    }
+    return Option.none()
+  }
+)
+
+/**
+ * Counts all the element of the given array that pass the given predicate
+ *
+ * **Example**
+ *
+ * ```ts
+ * import { Array } from "effect"
+ *
+ * const result = Array.countBy([1, 2, 3, 4, 5], n => n % 2 === 0)
+ * console.log(result) // 2
+ * ```
+ *
+ * @category folding
+ * @since 3.16.0
+ */
+export const countBy: {
+  <A>(predicate: (a: NoInfer<A>, i: number) => boolean): (self: Iterable<A>) => number
+  <A>(self: Iterable<A>, predicate: (a: A, i: number) => boolean): number
+} = dual(
+  2,
+  <A>(
+    self: Iterable<A>,
+    f: (a: A, i: number) => boolean
+  ): number => {
+    let count = 0
+    const as = fromIterable(self)
+    for (let i = 0; i < as.length; i++) {
+      const a = as[i]
+      if (f(a, i)) {
+        count++
+      }
+    }
+    return count
+  }
+)
+
+/**
  * Insert an element at the specified index, creating a new `NonEmptyArray`,
  * or return `None` if the index is out of bounds.
  *
@@ -1221,8 +1304,15 @@ export const modify: {
   ): ReadonlyArray.With<S, ReadonlyArray.Infer<S> | B>
 } = dual(
   3,
-  <A, B>(self: Iterable<A>, i: number, f: (a: A) => B): Array<A | B> =>
-    Option.getOrElse(modifyOption(self, i, f), () => Array.from(self))
+  <A, B>(self: Iterable<A>, i: number, f: (a: A) => B): Array<A | B> => {
+    const out: Array<A | B> = Array.from(self)
+    if (isOutOfBounds(i, out)) {
+      return out
+    }
+    const b = f(out[i] as A)
+    out[i] = b
+    return out
+  }
 )
 
 /**
@@ -1255,11 +1345,11 @@ export const modifyOption: {
     f: (a: ReadonlyArray.Infer<S>) => B
   ): Option.Option<ReadonlyArray.With<S, ReadonlyArray.Infer<S> | B>>
 } = dual(3, <A, B>(self: Iterable<A>, i: number, f: (a: A) => B): Option.Option<Array<A | B>> => {
-  const arr = Array.from(self)
+  const arr = fromIterable(self)
   if (isOutOfBounds(i, arr)) {
     return Option.none()
   }
-  const out: Array<A | B> = arr
+  const out: Array<A | B> = Array.isArray(self) ? self.slice() : arr
   const b = f(arr[i])
   out[i] = b
   return Option.some(out)
@@ -1294,6 +1384,38 @@ export const remove: {
   }
   out.splice(i, 1)
   return out
+})
+
+/**
+ * Delete the element at the specified index, creating a new `Array`,
+ * or return `None` if the index is out of bounds.
+ *
+ * @example
+ * ```ts
+ * import * as assert from "node:assert"
+ * import { Array, Option } from "effect"
+ *
+ * const numbers = [1, 2, 3, 4]
+ * const result = Array.removeOption(numbers, 2)
+ * assert.deepStrictEqual(result, Option.some([1, 2, 4]))
+ *
+ * const outOfBoundsResult = Array.removeOption(numbers, 5)
+ * assert.deepStrictEqual(outOfBoundsResult, Option.none())
+ * ```
+ *
+ * @since 3.16.0
+ */
+export const removeOption: {
+  (i: number): <A>(self: Iterable<A>) => Option.Option<Array<A>>
+  <A>(self: Iterable<A>, i: number): Option.Option<Array<A>>
+} = dual(2, <A>(self: Iterable<A>, i: number): Option.Option<Array<A>> => {
+  const arr = fromIterable(self)
+  if (isOutOfBounds(i, arr)) {
+    return Option.none()
+  }
+  const out = Array.isArray(self) ? self.slice() : arr
+  out.splice(i, 1)
+  return Option.some(out)
 })
 
 /**
@@ -1656,8 +1778,8 @@ export const setNonEmptyLast: {
  * ```ts
  * import { Array } from "effect"
  *
- * const result = Array.rotate(['a', 'b', 'c', 'd'], 2)
- * console.log(result) // ['c', 'd', 'a', 'b']
+ * const result = Array.rotate(['a', 'b', 'c', 'd', 'e'], 2)
+ * console.log(result) // [ 'd', 'e', 'a', 'b', 'c' ]
  * ```
  *
  * @since 2.0.0
@@ -2013,9 +2135,14 @@ export const chunksOf: {
  * @since 3.13.2
  */
 export const window: {
-  (n: number): <A>(self: Iterable<A>) => Array<Array<A>>
-  <A>(self: Iterable<A>, n: number): Array<Array<A>>
-} = dual(2, <A>(self: Iterable<A>, n: number): Array<Array<A>> => {
+  <N extends number = number>(
+    n: N
+  ): <A>(self: Iterable<A>) => Array<TupleOf<N, A>>
+  <A, N extends number = number>(
+    self: Iterable<A>,
+    n: N
+  ): Array<TupleOf<N, A>>
+} = dual(2, <A, const N extends number>(self: Iterable<A>, n: N): Array<Array<A>> => {
   const input = fromIterable(self)
   if (n > 0 && isNonEmptyReadonlyArray(input)) {
     return Array.from(
@@ -3241,7 +3368,7 @@ export const cartesian: {
  * 2. Within the do simulation scope, you can use the `bind` function to define variables and bind them to `Array` values
  * 3. You can accumulate multiple `bind` statements to define multiple variables within the scope
  * 4. Inside the do simulation scope, you can also use the `let` function to define variables and bind them to simple values
- * 5. Regular `Option` functions like `map` and `filter` can still be used within the do simulation. These functions will receive the accumulated variables as arguments within the scope
+ * 5. Regular `Array` functions like `map` and `filter` can still be used within the do simulation. These functions will receive the accumulated variables as arguments within the scope
  *
  * **Example**
  *
@@ -3290,7 +3417,7 @@ export const Do: ReadonlyArray<{}> = of({})
  * 2. Within the do simulation scope, you can use the `bind` function to define variables and bind them to `Array` values
  * 3. You can accumulate multiple `bind` statements to define multiple variables within the scope
  * 4. Inside the do simulation scope, you can also use the `let` function to define variables and bind them to simple values
- * 5. Regular `Option` functions like `map` and `filter` can still be used within the do simulation. These functions will receive the accumulated variables as arguments within the scope
+ * 5. Regular `Array` functions like `map` and `filter` can still be used within the do simulation. These functions will receive the accumulated variables as arguments within the scope
  *
  * **Example**
  *
@@ -3351,7 +3478,7 @@ export const bind: {
  * 2. Within the do simulation scope, you can use the `bind` function to define variables and bind them to `Array` values
  * 3. You can accumulate multiple `bind` statements to define multiple variables within the scope
  * 4. Inside the do simulation scope, you can also use the `let` function to define variables and bind them to simple values
- * 5. Regular `Option` functions like `map` and `filter` can still be used within the do simulation. These functions will receive the accumulated variables as arguments within the scope
+ * 5. Regular `Array` functions like `map` and `filter` can still be used within the do simulation. These functions will receive the accumulated variables as arguments within the scope
  *
  * **Example**
  *
@@ -3416,7 +3543,7 @@ export {
    * 2. Within the do simulation scope, you can use the `bind` function to define variables and bind them to `Array` values
    * 3. You can accumulate multiple `bind` statements to define multiple variables within the scope
    * 4. Inside the do simulation scope, you can also use the `let` function to define variables and bind them to simple values
-   * 5. Regular `Option` functions like `map` and `filter` can still be used within the do simulation. These functions will receive the accumulated variables as arguments within the scope
+   * 5. Regular `Array` functions like `map` and `filter` can still be used within the do simulation. These functions will receive the accumulated variables as arguments within the scope
    *
    * **Example**
    *

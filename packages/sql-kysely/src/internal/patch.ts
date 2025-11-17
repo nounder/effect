@@ -1,9 +1,10 @@
 import type * as Client from "@effect/sql/SqlClient"
 import { SqlError } from "@effect/sql/SqlError"
-import * as Otel from "@opentelemetry/semantic-conventions"
 import * as Effect from "effect/Effect"
 import * as Effectable from "effect/Effectable"
 import type { Compilable } from "kysely"
+
+const ATTR_DB_QUERY_TEXT = "db.query.text"
 
 interface Executable extends Compilable {
   execute: () => Promise<ReadonlyArray<unknown>>
@@ -35,7 +36,7 @@ function effectifyWith(
   commit: () => Effect.Effect<ReadonlyArray<unknown>, SqlError>,
   whitelist: Array<string>
 ) {
-  if (typeof obj !== "object") {
+  if (typeof obj !== "object" || obj === null) {
     return obj
   }
   return new Proxy(obj, {
@@ -72,7 +73,7 @@ function executeCommit(this: Executable) {
     kind: "client",
     captureStackTrace: false,
     attributes: {
-      [Otel.SEMATTRS_DB_STATEMENT]: this.compile().sql
+      [ATTR_DB_QUERY_TEXT]: this.compile().sql
     }
   }))
 }

@@ -1,7 +1,7 @@
 import * as UrlParams from "@effect/platform/UrlParams"
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Effect, Option, Schema } from "effect"
-import { deepStrictEqual, strictEqual } from "effect/test/util"
 
 describe("UrlParams", () => {
   describe("makeUrl", () => {
@@ -109,6 +109,115 @@ describe("UrlParams", () => {
         { "a": "1", "b": "true", "c": "string", "e": ["1", "2", "3"] }
       )
     })
+
+    it("works with __proto__", () => {
+      const urlParams = UrlParams.fromInput({ ["__proto__"]: "foo" })
+      const result = UrlParams.toRecord(urlParams)
+      deepStrictEqual(result, { ["__proto__"]: "foo" })
+    })
+  })
+
+  describe("getAll", () => {
+    const params = UrlParams.fromInput({ foo: ["a", "b"], bar: "c" })
+
+    it("returns every value for the provided key", () => {
+      deepStrictEqual(UrlParams.getAll(params, "foo"), ["a", "b"])
+    })
+
+    it("returns an empty array when the key is missing", () => {
+      deepStrictEqual(UrlParams.getAll(params, "missing"), [])
+    })
+  })
+
+  describe("getFirst", () => {
+    const params = UrlParams.fromInput({ foo: ["a", "b"] })
+
+    it("returns the first value wrapped in Option", () => {
+      deepStrictEqual(UrlParams.getFirst(params, "foo"), Option.some("a"))
+    })
+
+    it("returns none when the key is missing", () => {
+      deepStrictEqual(UrlParams.getFirst(params, "missing"), Option.none())
+    })
+  })
+
+  describe("getLast", () => {
+    const params = UrlParams.fromInput({ foo: ["a", "b"] })
+
+    it("returns the last value wrapped in Option", () => {
+      deepStrictEqual(UrlParams.getLast(params, "foo"), Option.some("b"))
+    })
+
+    it("returns none when the key is missing", () => {
+      deepStrictEqual(UrlParams.getLast(params, "missing"), Option.none())
+    })
+  })
+
+  describe("setAll", () => {
+    it("overwrites provided keys while preserving others", () => {
+      const prev = UrlParams.fromInput({
+        baz: "c",
+        foo: "d"
+      })
+      const next = UrlParams.fromInput({
+        foo: "a",
+        bar: "b"
+      })
+
+      deepStrictEqual(
+        UrlParams.toRecord(UrlParams.setAll(prev, next)),
+        {
+          baz: "c",
+          foo: "a",
+          bar: "b"
+        }
+      )
+    })
+  })
+
+  describe("set", () => {
+    it("overwrites only the targeted key", () => {
+      const params = UrlParams.fromInput({ foo: "d", baz: "c" })
+      deepStrictEqual(
+        UrlParams.toRecord(UrlParams.set(params, "foo", "a")),
+        { baz: "c", foo: "a" }
+      )
+    })
+  })
+
+  describe("append", () => {
+    it("preserves existing entries and appends a new pair", () => {
+      const params = UrlParams.fromInput({ foo: "a" })
+      const appended = UrlParams.append(params, "foo", "b")
+      deepStrictEqual(UrlParams.getAll(appended, "foo"), ["a", "b"])
+    })
+  })
+
+  describe("appendAll", () => {
+    it("appends all entries while keeping order", () => {
+      const params = UrlParams.fromInput({ foo: "a" })
+      const appended = UrlParams.appendAll(params, {
+        foo: "b",
+        bar: "c"
+      })
+      deepStrictEqual(
+        UrlParams.toRecord(appended),
+        { foo: ["a", "b"], bar: "c" }
+      )
+    })
+  })
+
+  describe("remove", () => {
+    it("removes every instance of the provided key", () => {
+      const params = UrlParams.fromInput({
+        foo: ["a", "b"],
+        bar: "c"
+      })
+      deepStrictEqual(
+        UrlParams.toRecord(UrlParams.remove(params, "foo")),
+        { bar: "c" }
+      )
+    })
   })
 
   describe("schemaStruct", () => {
@@ -139,6 +248,30 @@ describe("UrlParams", () => {
         deepStrictEqual(result, {
           a: [10, "string"],
           b: false
+        })
+      }))
+  })
+
+  describe("schemaParse", () => {
+    const schema = UrlParams.schemaParse(Schema.Struct({
+      a: Schema.NumberFromString,
+      b: Schema.BooleanFromString,
+      c: Schema.String
+    }))
+
+    it.effect("roundtrip", () =>
+      Effect.gen(function*() {
+        const encoded = yield* Schema.encode(schema)({
+          a: 10,
+          b: true,
+          c: "string"
+        })
+        strictEqual(encoded, "a=10&b=true&c=string")
+        const decoded = yield* Schema.decode(schema)(encoded)
+        deepStrictEqual(decoded, {
+          a: 10,
+          b: true,
+          c: "string"
         })
       }))
   })

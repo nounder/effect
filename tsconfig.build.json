@@ -4,7 +4,9 @@
   "references": [
     { "path": "packages/effect/tsconfig.build.json" },
     { "path": "packages/ai/ai/tsconfig.build.json" },
+    { "path": "packages/ai/amazon-bedrock/tsconfig.build.json" },
     { "path": "packages/ai/anthropic/tsconfig.build.json" },
+    { "path": "packages/ai/google/tsconfig.build.json" },
     { "path": "packages/ai/openai/tsconfig.build.json" },
     { "path": "packages/cli/tsconfig.build.json" },
     { "path": "packages/cluster/tsconfig.build.json" },
@@ -33,6 +35,7 @@
     { "path": "packages/sql-sqlite-react-native/tsconfig.build.json" },
     { "path": "packages/sql-sqlite-wasm/tsconfig.build.json" },
     { "path": "packages/typeclass/tsconfig.build.json" },
-    { "path": "packages/vitest/tsconfig.build.json" }
+    { "path": "packages/vitest/tsconfig.build.json" },
+    { "path": "packages/workflow/tsconfig.build.json" }
   ]
 }

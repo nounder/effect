@@ -144,8 +144,8 @@ export const isEmpty: <K, V>(self: HashMap<K, V>) => boolean = HM.isEmpty
  * @category elements
  */
 export const get: {
-  <K1>(key: K1): <K, V>(self: HashMap<K, V>) => Option<V>
-  <K, V, K1>(self: HashMap<K, V>, key: K1): Option<V>
+  <K1 extends K, K>(key: K1): <V>(self: HashMap<K, V>) => Option<V>
+  <K1 extends K, K, V>(self: HashMap<K, V>, key: K1): Option<V>
 } = HM.get
 
 /**
@@ -155,8 +155,8 @@ export const get: {
  * @category elements
  */
 export const getHash: {
-  <K1>(key: K1, hash: number): <K, V>(self: HashMap<K, V>) => Option<V>
-  <K, V, K1>(self: HashMap<K, V>, key: K1, hash: number): Option<V>
+  <K1 extends K, K>(key: K1, hash: number): <V>(self: HashMap<K, V>) => Option<V>
+  <K1 extends K, K, V>(self: HashMap<K, V>, key: K1, hash: number): Option<V>
 } = HM.getHash
 
 /**
@@ -167,8 +167,8 @@ export const getHash: {
  * @category unsafe
  */
 export const unsafeGet: {
-  <K1>(key: K1): <K, V>(self: HashMap<K, V>) => V
-  <K, V, K1>(self: HashMap<K, V>, key: K1): V
+  <K1 extends K, K>(key: K1): <V>(self: HashMap<K, V>) => V
+  <K1 extends K, K, V>(self: HashMap<K, V>, key: K1): V
 } = HM.unsafeGet
 
 /**
@@ -178,8 +178,8 @@ export const unsafeGet: {
  * @category elements
  */
 export const has: {
-  <K1>(key: K1): <K, V>(self: HashMap<K, V>) => boolean
-  <K, V, K1>(self: HashMap<K, V>, key: K1): boolean
+  <K1 extends K, K>(key: K1): <K, V>(self: HashMap<K, V>) => boolean
+  <K1 extends K, K, V>(self: HashMap<K, V>, key: K1): boolean
 } = HM.has
 
 /**
@@ -190,9 +190,30 @@ export const has: {
  * @category elements
  */
 export const hasHash: {
-  <K1>(key: K1, hash: number): <K, V>(self: HashMap<K, V>) => boolean
-  <K, V, K1>(self: HashMap<K, V>, key: K1, hash: number): boolean
+  <K1 extends K, K>(key: K1, hash: number): <V>(self: HashMap<K, V>) => boolean
+  <K1 extends K, K, V>(self: HashMap<K, V>, key: K1, hash: number): boolean
 } = HM.hasHash
+
+/**
+ * Checks if an element matching the given predicate exists in the given `HashMap`.
+ *
+ * @example
+ * ```ts
+ * import { HashMap } from "effect"
+ *
+ * const hm = HashMap.make([1, 'a'])
+ * HashMap.hasBy(hm, (value, key) => value === 'a' && key === 1); // -> true
+ * HashMap.hasBy(hm, (value) => value === 'b'); // -> false
+ *
+ * ```
+ *
+ * @since 3.16.0
+ * @category elements
+ */
+export const hasBy: {
+  <K, V>(predicate: (value: NoInfer<V>, key: NoInfer<K>) => boolean): (self: HashMap<K, V>) => boolean
+  <K, V>(self: HashMap<K, V>, predicate: (value: NoInfer<V>, key: NoInfer<K>) => boolean): boolean
+} = HM.hasBy
 
 /**
  * Sets the specified key to the specified value using the internal hashing
@@ -260,6 +281,27 @@ export const toEntries = <K, V>(self: HashMap<K, V>): Array<[K, V]> => Array.fro
  * @category getters
  */
 export const size: <K, V>(self: HashMap<K, V>) => number = HM.size
+
+/**
+ * Counts all the element of the given HashMap that pass the given predicate
+ *
+ * **Example**
+ *
+ * ```ts
+ * import { HashMap } from "effect"
+ *
+ * const map = HashMap.make([1, "a"], [2, "b"], [3, "c"])
+ * const result = HashMap.countBy(map, (_v, key) => key % 2 === 1)
+ * console.log(result) // 2
+ * ```
+ *
+ * @since 3.17.0
+ * @category folding
+ */
+export const countBy: {
+  <K, V>(predicate: (value: NoInfer<V>, key: NoInfer<K>) => boolean): (self: HashMap<K, V>) => number
+  <K, V>(self: HashMap<K, V>, predicate: (value: NoInfer<V>, key: NoInfer<K>) => boolean): number
+} = HM.countBy
 
 /**
  * Marks the `HashMap` as mutable.

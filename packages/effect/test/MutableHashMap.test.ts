@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Equal, Hash, MutableHashMap as HM, Option, pipe } from "effect"
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 class Key implements Equal.Equal {
   constructor(readonly a: number, readonly b: number) {}
@@ -72,7 +72,7 @@ describe("MutableHashMap", () => {
     if (typeof window !== "undefined") {
       return
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { inspect } = require("node:util")
 
     const map = HM.make(

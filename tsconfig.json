@@ -4,7 +4,9 @@
   "references": [
     { "path": "packages/effect" },
     { "path": "packages/ai/ai" },
+    { "path": "packages/ai/amazon-bedrock" },
     { "path": "packages/ai/anthropic" },
+    { "path": "packages/ai/google" },
     { "path": "packages/ai/openai" },
     { "path": "packages/cli" },
     { "path": "packages/cluster" },
@@ -33,6 +35,7 @@
     { "path": "packages/sql-sqlite-react-native" },
     { "path": "packages/sql-sqlite-wasm" },
     { "path": "packages/typeclass" },
-    { "path": "packages/vitest" }
+    { "path": "packages/vitest" },
+    { "path": "packages/workflow" }
   ]
 }

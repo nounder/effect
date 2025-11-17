@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
+import { assertInclude, assertTrue, deepStrictEqual } from "@effect/vitest/utils"
 import { Cause, Data, Effect, pipe } from "effect"
-import { assertInclude, assertTrue, deepStrictEqual } from "effect/test/util"
 
 class TestError extends Data.TaggedError("TestError")<{}> {}
 
@@ -58,7 +58,7 @@ describe("Effect", () => {
     }))
 
   if (typeof window === "undefined") {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { inspect } = require("node:util")
 
     it("inspect", () => {

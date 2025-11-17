@@ -1,9 +1,10 @@
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual, strictEqual } from "@effect/vitest/utils"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { constFalse, constTrue, pipe } from "effect/Function"
 import * as Ref from "effect/Ref"
 import * as Schedule from "effect/Schedule"
-import { strictEqual } from "effect/test/util"
 
 describe("Effect", () => {
   it.effect("retry/until - retries until condition is true", () =>
@@ -97,6 +98,56 @@ describe("Effect", () => {
       )
       const result = yield* (Ref.get(ref))
       strictEqual(result, 4)
+    }))
+  it.effect("retry/schedule - CurrentIterationMetadata", () =>
+    Effect.gen(function*() {
+      const ref = yield* Ref.make<Array<undefined | Schedule.IterationMetadata>>([])
+      yield* pipe(
+        Effect.gen(function*() {
+          const currentIterationMeta = yield* Schedule.CurrentIterationMetadata
+          yield* Ref.update(ref, (infos) => [...infos, currentIterationMeta])
+        }),
+        Effect.flipWith(Effect.retry(Schedule.recurs(3)))
+      )
+      const result = yield* (Ref.get(ref))
+      deepStrictEqual(result, [
+        {
+          elapsed: Duration.zero,
+          elapsedSincePrevious: Duration.zero,
+          recurrence: 0,
+          input: undefined,
+          output: undefined,
+          now: 0,
+          start: 0
+        },
+        {
+          elapsed: Duration.zero,
+          elapsedSincePrevious: Duration.zero,
+          recurrence: 1,
+          input: undefined,
+          output: 0,
+          now: 0,
+          start: 0
+        },
+        {
+          elapsed: Duration.zero,
+          elapsedSincePrevious: Duration.zero,
+          recurrence: 2,
+          input: undefined,
+          output: 1,
+          now: 0,
+          start: 0
+        },
+        {
+          elapsed: Duration.zero,
+          elapsedSincePrevious: Duration.zero,
+          recurrence: 3,
+          input: undefined,
+          output: 2,
+          now: 0,
+          start: 0
+        }
+      ])
     }))
 
   it.effect("retry/schedule + until", () =>

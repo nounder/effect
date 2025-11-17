@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Equal, Hash, Order, pipe, SortedSet, String as Str } from "effect"
-import { assertFalse, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 class Member implements Equal.Equal {
   constructor(readonly id: string) {}
@@ -59,7 +59,7 @@ describe("SortedSet", () => {
     if (typeof window !== "undefined") {
       return
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { inspect } = require("node:util")
     const set = makeNumericSortedSet(0, 1, 2)
     deepStrictEqual(inspect(set), inspect({ _id: "SortedSet", values: [0, 1, 2] }))

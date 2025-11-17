@@ -281,7 +281,10 @@ export const raw = (body: unknown, options?: ServerResponse.Options | undefined)
     options?.statusText,
     options?.headers ? Headers.fromInput(options.headers) : Headers.empty,
     options?.cookies ?? Cookies.empty,
-    internalBody.raw(body)
+    internalBody.raw(body, {
+      contentType: options?.contentType,
+      contentLength: options?.contentLength
+    })
   )
 
 /** @internal */
@@ -513,6 +516,32 @@ export const removeCookie = dual<
 )
 
 /** @internal */
+export const expireCookie = dual<
+  (
+    name: string,
+    options?: Omit<Cookies.Cookie["options"], "expires" | "maxAge">
+  ) => (self: ServerResponse.HttpServerResponse) => ServerResponse.HttpServerResponse,
+  (
+    self: ServerResponse.HttpServerResponse,
+    name: string,
+    options?: Omit<Cookies.Cookie["options"], "expires" | "maxAge">
+  ) => ServerResponse.HttpServerResponse
+>(
+  3,
+  (self, name, options) =>
+    new ServerResponseImpl(
+      self.status,
+      self.statusText,
+      self.headers,
+      Cookies.unsafeSet(self.cookies, name, "", {
+        ...(options ?? {}),
+        maxAge: 0
+      }),
+      self.body
+    )
+)
+
+/** @internal */
 export const setHeaders = dual<
   (input: Headers.Input) => (self: ServerResponse.HttpServerResponse) => ServerResponse.HttpServerResponse,
   (self: ServerResponse.HttpServerResponse, input: Headers.Input) => ServerResponse.HttpServerResponse
@@ -589,6 +618,12 @@ export const toWeb = (response: ServerResponse.HttpServerResponse, options?: {
     }
     case "Uint8Array":
     case "Raw": {
+      if (body.body instanceof Response) {
+        for (const [key, value] of headers as any) {
+          body.body.headers.set(key, value)
+        }
+        return body.body
+      }
       return new Response(body.body as any, {
         status: response.status,
         statusText: response.statusText,

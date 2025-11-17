@@ -1,8 +1,8 @@
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual } from "@effect/vitest/utils"
 import * as DateTime from "effect/DateTime"
 import * as S from "effect/Schema"
-import * as Util from "effect/test/Schema/TestUtils"
-import { deepStrictEqual } from "effect/test/util"
+import * as Util from "../../TestUtils.js"
 
 describe("DateTimeUtcFromDate", () => {
   const schema = S.DateTimeUtcFromDate
@@ -24,7 +24,7 @@ describe("DateTimeUtcFromDate", () => {
       null,
       `DateTimeUtcFromDate
 └─ Encoded side transformation failure
-   └─ Expected DateFromSelf, actual null`
+   └─ Expected a Date to be decoded into a DateTime.Utc, actual null`
     )
     await Util.assertions.decoding.fail(
       schema,

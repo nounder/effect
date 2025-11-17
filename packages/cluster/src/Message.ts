@@ -1,17 +1,19 @@
 /**
  * @since 1.0.0
  */
-import type * as Rpc from "@effect/rpc/Rpc"
-import { FiberRef } from "effect"
+import * as Rpc from "@effect/rpc/Rpc"
 import type { Context } from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as FiberRef from "effect/FiberRef"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type { PersistenceError } from "./ClusterError.js"
 import { MalformedMessage } from "./ClusterError.js"
+import type { EntityAddress } from "./EntityAddress.js"
 import * as Envelope from "./Envelope.js"
 import type * as Reply from "./Reply.js"
+import type { Snowflake } from "./Snowflake.js"
 
 /**
  * @since 1.0.0
@@ -84,7 +86,7 @@ export class OutgoingRequest<R extends Rpc.Any> extends Data.TaggedClass("Outgoi
   readonly context: Context<Rpc.Context<R>>
   readonly lastReceivedReply: Option.Option<Reply.Reply<R>>
   readonly rpc: R
-  readonly respond: (reply: Reply.Reply<R>) => Effect.Effect<void, PersistenceError>
+  readonly respond: (reply: Reply.Reply<R>) => Effect.Effect<void>
 }> {
   /**
    * @since 1.0.0
@@ -99,7 +101,27 @@ export class OutgoingRequest<R extends Rpc.Any> extends Data.TaggedClass("Outgoi
 export class OutgoingEnvelope extends Data.TaggedClass("OutgoingEnvelope")<{
   readonly envelope: Envelope.AckChunk | Envelope.Interrupt
   readonly rpc: Rpc.AnyWithProps
-}> {}
+}> {
+  /**
+   * @since 1.0.0
+   */
+  static interrupt(options: {
+    readonly address: EntityAddress
+    readonly id: Snowflake
+    readonly requestId: Snowflake
+  }): OutgoingEnvelope {
+    return new OutgoingEnvelope({
+      envelope: new Envelope.Interrupt(options),
+      rpc: neverRpc
+    })
+  }
+}
+
+const neverRpc = Rpc.make("Never", {
+  success: Schema.Never as any,
+  error: Schema.Never,
+  payload: {}
+})
 
 /**
  * @since 1.0.0

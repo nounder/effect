@@ -18,7 +18,6 @@ import { pipeArguments } from "../../Pipeable.js"
 import * as Predicate from "../../Predicate.js"
 import * as Readable from "../../Readable.js"
 import type * as Ref from "../../Ref.js"
-import type * as Schedule from "../../Schedule.js"
 import { currentScheduler } from "../../Scheduler.js"
 import type * as Scope from "../../Scope.js"
 import type * as Supervisor from "../../Supervisor.js"
@@ -31,7 +30,6 @@ import * as internalFiber from "../fiber.js"
 import * as fiberRuntime from "../fiberRuntime.js"
 import { globalScope } from "../fiberScope.js"
 import * as internalRef from "../ref.js"
-import * as schedule_ from "../schedule.js"
 import * as supervisor from "../supervisor.js"
 
 /** @internal */
@@ -39,7 +37,7 @@ class Semaphore {
   public waiters = new Set<() => void>()
   public taken = 0
 
-  constructor(readonly permits: number) {}
+  constructor(public permits: number) {}
 
   get free() {
     return this.permits - this.taken
@@ -65,21 +63,35 @@ class Semaphore {
       return resume(core.succeed(n))
     })
 
-  readonly updateTaken = (f: (n: number) => number): Effect.Effect<number> =>
-    core.withFiberRuntime((fiber) => {
-      this.taken = f(this.taken)
-      if (this.waiters.size > 0) {
-        fiber.getFiberRef(currentScheduler).scheduleTask(() => {
-          const iter = this.waiters.values()
-          let item = iter.next()
-          while (item.done === false && this.free > 0) {
-            item.value()
-            item = iter.next()
-          }
-        }, fiber.getFiberRef(core.currentSchedulingPriority))
-      }
-      return core.succeed(this.free)
-    })
+  updateTakenUnsafe(fiber: Fiber.RuntimeFiber<any, any>, f: (n: number) => number): Effect.Effect<number> {
+    this.taken = f(this.taken)
+    if (this.waiters.size > 0) {
+      fiber.getFiberRef(currentScheduler).scheduleTask(() => {
+        const iter = this.waiters.values()
+        let item = iter.next()
+        while (item.done === false && this.free > 0) {
+          item.value()
+          item = iter.next()
+        }
+      }, fiber.getFiberRef(core.currentSchedulingPriority))
+    }
+    return core.succeed(this.free)
+  }
+
+  updateTaken(f: (n: number) => number): Effect.Effect<number> {
+    return core.withFiberRuntime((fiber) => this.updateTakenUnsafe(fiber, f))
+  }
+
+  readonly resize = (permits: number) =>
+    core.asVoid(
+      core.withFiberRuntime((fiber) => {
+        this.permits = permits
+        if (this.free < 0) {
+          return core.void
+        }
+        return this.updateTakenUnsafe(fiber, (taken) => taken)
+      })
+    )
 
   readonly release = (n: number): Effect.Effect<number> => this.updateTaken((taken) => taken - n)
 
@@ -106,7 +118,7 @@ class Semaphore {
 }
 
 /** @internal */
-export const unsafeMakeSemaphore = (permits: number): Semaphore => new Semaphore(permits)
+export const unsafeMakeSemaphore = (permits: number): Effect.Semaphore => new Semaphore(permits)
 
 /** @internal */
 export const makeSemaphore = (permits: number) => core.sync(() => unsafeMakeSemaphore(permits))
@@ -476,19 +488,6 @@ export const raceFirst = dual<
     fiberRuntime.race(core.exit(that)),
     (effect: Effect.Effect<Exit.Exit<A | A2, E | E2>, never, R | R2>) => core.flatten(effect)
   ))
-
-/** @internal */
-export const scheduleForked = dual<
-  <Out, R2>(
-    schedule: Schedule.Schedule<Out, unknown, R2>
-  ) => <A, E, R>(
-    self: Effect.Effect<A, E, R>
-  ) => Effect.Effect<Fiber.RuntimeFiber<Out, E>, never, R | R2 | Scope.Scope>,
-  <A, E, R, Out, R2>(
-    self: Effect.Effect<A, E, R>,
-    schedule: Schedule.Schedule<Out, unknown, R2>
-  ) => Effect.Effect<Fiber.RuntimeFiber<Out, E>, never, R | R2 | Scope.Scope>
->(2, (self, schedule) => pipe(self, schedule_.schedule_Effect(schedule), forkScoped))
 
 /** @internal */
 export const supervised = dual<

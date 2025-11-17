@@ -83,7 +83,7 @@ const fromInputNested = (input: Input): Array<[string | Array<string>, any]> => 
  * @since 1.0.0
  * @category schemas
  */
-export const schema: Schema.Schema<UrlParams, ReadonlyArray<readonly [string, string]>> = Schema.Array(
+export const schemaFromSelf: Schema.Schema<UrlParams> = Schema.Array(
   Schema.Tuple(Schema.String, Schema.String)
 ).annotations({ identifier: "UrlParams" })
 
@@ -158,12 +158,16 @@ export const setAll: {
   (input: Input): (self: UrlParams) => UrlParams
   (self: UrlParams, input: Input): UrlParams
 } = dual(2, (self: UrlParams, input: Input): UrlParams => {
-  const toSet = fromInput(input)
-  const keys = toSet.map(([k]) => k)
-  return Arr.appendAll(
-    Arr.filter(self, ([k]) => keys.includes(k)),
-    toSet
-  )
+  const out = fromInput(input) as Array<readonly [string, string]>
+  const keys = new Set()
+  for (let i = 0; i < out.length; i++) {
+    keys.add(out[i][0])
+  }
+  for (let i = 0; i < self.length; i++) {
+    if (keys.has(self[i][0])) continue
+    out.push(self[i])
+  }
+  return out
 })
 
 /**
@@ -261,7 +265,7 @@ const baseUrl = (): string | undefined => {
  * @category conversions
  */
 export const toRecord = (self: UrlParams): Record<string, string | Arr.NonEmptyArray<string>> => {
-  const out: Record<string, string | Arr.NonEmptyArray<string>> = {}
+  const out: Record<string, string | Arr.NonEmptyArray<string>> = Object.create(null)
   for (const [k, value] of self) {
     const curr = out[k]
     if (curr === undefined) {
@@ -272,7 +276,7 @@ export const toRecord = (self: UrlParams): Record<string, string | Arr.NonEmptyA
       curr.push(value)
     }
   }
-  return out
+  return { ...out }
 }
 
 /**
@@ -330,3 +334,52 @@ export const schemaStruct = <A, I extends Record<string, string | ReadonlyArray<
   const parse = Schema.decodeUnknown(schema, options)
   return parse(toRecord(self))
 }
+
+/**
+ * @since 1.0.0
+ * @category schema
+ */
+export const schemaFromString: Schema.Schema<UrlParams, string> = Schema.transform(
+  Schema.String,
+  schemaFromSelf,
+  {
+    decode(fromA) {
+      return fromInput(new URLSearchParams(fromA))
+    },
+    encode(toI) {
+      return toString(toI)
+    }
+  }
+)
+
+/**
+ * @since 1.0.0
+ * @category schema
+ */
+export const schemaRecord = <A, I extends Record<string, string | ReadonlyArray<string> | undefined>, R>(
+  schema: Schema.Schema<A, I, R>
+): Schema.Schema<A, UrlParams, R> =>
+  Schema.transform(
+    schemaFromSelf,
+    schema,
+    {
+      decode(fromA) {
+        return toRecord(fromA) as I
+      },
+      encode(toI) {
+        return fromInput(toI as Input) as UrlParams
+      }
+    }
+  )
+
+/**
+ * @since 1.0.0
+ * @category schema
+ */
+export const schemaParse = <A, I extends Record<string, string | ReadonlyArray<string> | undefined>, R>(
+  schema: Schema.Schema<A, I, R>
+): Schema.Schema<A, string, R> =>
+  Schema.compose(
+    schemaFromString,
+    schemaRecord(schema)
+  )

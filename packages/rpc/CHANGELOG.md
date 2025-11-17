@@ -1,5 +1,797 @@
 # @effect/rpc
 
+## 0.72.1
+
+### Patch Changes
+
+- [#5682](https://github.com/Effect-TS/effect/pull/5682) [`d43577b`](https://github.com/Effect-TS/effect/commit/d43577be59ae510812287b1cbffe6da15c040452) Thanks @jrmdayn! - Fix some typings around RpcServer context argument
+
+## 0.72.0
+
+### Patch Changes
+
+- [#5606](https://github.com/Effect-TS/effect/pull/5606) [`24a1685`](https://github.com/Effect-TS/effect/commit/24a1685c70a9ed157468650f95a5c3da3f2c2433) Thanks @tim-smart! - backport @effect/cluster from effect v4
+
+  @effect/cluster no longer requires a Shard Manager, and instead relies on the
+  `RunnerStorage` service to track runner state.
+
+  To migrate, remove any Shard Manager deployments and use the updated layers in
+  `@effect/platform-node` or `@effect/platform-bun`.
+
+  # Breaking Changes
+  - `ShardManager` module has been removed
+  - `EntityNotManagedByRunner` error has been removed
+  - Shard locks now use database advisory locks, which requires stable sessions
+    for database connections. This means load balancers or proxies that rotate
+    connections may cause issues.
+  - `@effect/platform-node/NodeClusterSocketRunner` is now
+    `@effect/cluster/NodeClusterSocket`
+  - `@effect/platform-node/NodeClusterHttpRunner` is now
+    `@effect/cluster/NodeClusterHttp`
+  - `@effect/platform-bun/BunClusterSocketRunner` is now
+    `@effect/cluster/BunClusterSocket`
+  - `@effect/platform-bun/BunClusterHttpRunner` is now
+    `@effect/cluster/BunClusterHttp`
+
+  # New Features
+  - `RunnerHealth.layerK8s` has been added, which uses the Kubernetes API to track
+    runner health and liveness. To use it, you will need a service account with
+    permissions to read pod information.
+
+- Updated dependencies [[`3c15d5f`](https://github.com/Effect-TS/effect/commit/3c15d5f99fb8d8470a00c5a33d9ba3cac89dfe4c), [`3863fa8`](https://github.com/Effect-TS/effect/commit/3863fa89f61e63e5529fd961e37333bddf7db64a), [`2a03c76`](https://github.com/Effect-TS/effect/commit/2a03c76c2781ca7e9e228e838eab2eb0d0795b1d), [`24a1685`](https://github.com/Effect-TS/effect/commit/24a1685c70a9ed157468650f95a5c3da3f2c2433)]:
+  - effect@3.19.0
+  - @effect/platform@0.93.0
+
+## 0.71.2
+
+### Patch Changes
+
+- [#5664](https://github.com/Effect-TS/effect/pull/5664) [`2603745`](https://github.com/Effect-TS/effect/commit/2603745badd442870673ee9ab49e2652ecbaba4f) Thanks @lucas-barake! - Expose disableFatalDefects option in RPC server public API
+
+- Updated dependencies [[`a537469`](https://github.com/Effect-TS/effect/commit/a5374696bdabee005bf75d7b1b57f8bee7763cba), [`52d5963`](https://github.com/Effect-TS/effect/commit/52d59635f35406bd27874ca0090f8642432928f4), [`463345d`](https://github.com/Effect-TS/effect/commit/463345d734fb462dc284d590193b7843dc104d78)]:
+  - effect@3.18.5
+
+## 0.71.1
+
+### Patch Changes
+
+- [#5642](https://github.com/Effect-TS/effect/pull/5642) [`b8e3c6d`](https://github.com/Effect-TS/effect/commit/b8e3c6d510aec858ac34bfe5eb2b8fc5506fd669) Thanks @tim-smart! - fix ReferenceError in NodeSocket.fromNet
+
+## 0.71.0
+
+### Patch Changes
+
+- Updated dependencies [[`1c6ab74`](https://github.com/Effect-TS/effect/commit/1c6ab74b314b2b6df8bb1b1a0cb9527ceda0e3fa), [`70fe803`](https://github.com/Effect-TS/effect/commit/70fe803469db3355ffbf8359b52c351f1c2dc137), [`c296e32`](https://github.com/Effect-TS/effect/commit/c296e32554143b84ae8987046984e1cf1852417c), [`a098ddf`](https://github.com/Effect-TS/effect/commit/a098ddfc551f5aa0a7c36f9b4928372a64d4d9f2)]:
+  - effect@3.18.0
+  - @effect/platform@0.92.0
+
+## 0.70.2
+
+### Patch Changes
+
+- [#5581](https://github.com/Effect-TS/effect/pull/5581) [`dd7b459`](https://github.com/Effect-TS/effect/commit/dd7b4591b79ed88f3c0fcc607f9e42f22883f9bd) Thanks @tim-smart! - persist activity interrupts as "Suspended"
+
+## 0.70.1
+
+### Patch Changes
+
+- [#5577](https://github.com/Effect-TS/effect/pull/5577) [`c9e1e40`](https://github.com/Effect-TS/effect/commit/c9e1e4064cef4c4324318ec76b35bbbdc026dace) Thanks @tim-smart! - ignore non-client interrupts in workflow activities
+
+## 0.70.0
+
+### Patch Changes
+
+- [#5549](https://github.com/Effect-TS/effect/pull/5549) [`d4d86a8`](https://github.com/Effect-TS/effect/commit/d4d86a81f02b94e09fce8004ce2c5369c505ca5a) Thanks @tim-smart! - remove msgpackr re-exports
+
+- Updated dependencies [[`d4d86a8`](https://github.com/Effect-TS/effect/commit/d4d86a81f02b94e09fce8004ce2c5369c505ca5a)]:
+  - @effect/platform@0.91.0
+
+## 0.69.5
+
+### Patch Changes
+
+- [#5548](https://github.com/Effect-TS/effect/pull/5548) [`ae3854d`](https://github.com/Effect-TS/effect/commit/ae3854d06c2c43ce94f0969e64633902738453f6) Thanks @tim-smart! - optimize non-streaming response for http rpc protocol
+
+## 0.69.4
+
+### Patch Changes
+
+- [#5527](https://github.com/Effect-TS/effect/pull/5527) [`e3dac95`](https://github.com/Effect-TS/effect/commit/e3dac9527ab8ff645c82b30ca2bba5a975b103df) Thanks @tim-smart! - attempt to prevent InterruptedException leaks into entity replies
+
+## 0.69.3
+
+### Patch Changes
+
+- [#5517](https://github.com/Effect-TS/effect/pull/5517) [`de07e58`](https://github.com/Effect-TS/effect/commit/de07e5805496b80226ba6a5efc2b4c05e1aba4b8) Thanks @tim-smart! - add onOpen option to Socket.run
+
+- Updated dependencies [[`de07e58`](https://github.com/Effect-TS/effect/commit/de07e5805496b80226ba6a5efc2b4c05e1aba4b8)]:
+  - @effect/platform@0.90.10
+
+## 0.69.2
+
+### Patch Changes
+
+- [#5453](https://github.com/Effect-TS/effect/pull/5453) [`d6887d5`](https://github.com/Effect-TS/effect/commit/d6887d54a6ec57778cf536b69c2cf96123cb38a6) Thanks @tim-smart! - wait for client to initialize before sending notifications
+
+## 0.69.1
+
+### Patch Changes
+
+- [#5415](https://github.com/Effect-TS/effect/pull/5415) [`4cb3af5`](https://github.com/Effect-TS/effect/commit/4cb3af5aeae8535a04f84fb0f64c3f2be19e2aed) Thanks @tim-smart! - fix rpc msgpack serialization when chunk contains partial frames
+
+## 0.69.0
+
+### Minor Changes
+
+- [#5389](https://github.com/Effect-TS/effect/pull/5389) [`3e163b2`](https://github.com/Effect-TS/effect/commit/3e163b24cc2b647e25566ba29ef25c3f57609042) Thanks @tim-smart! - expose clientId to rpc request handlers
+
+## 0.68.4
+
+### Patch Changes
+
+- [#5375](https://github.com/Effect-TS/effect/pull/5375) [`43fc52e`](https://github.com/Effect-TS/effect/commit/43fc52eb851b9272d09a17f38c18679d8d1aa61d) Thanks @patroza! - improve: add flatten option to RpcTest.makeClient
+
+## 0.68.3
+
+### Patch Changes
+
+- [#5338](https://github.com/Effect-TS/effect/pull/5338) [`1628026`](https://github.com/Effect-TS/effect/commit/1628026081ca9a4ec77182037f7cc46e7369de98) Thanks @tim-smart! - remove info log from RpcServer stdio protocol
+
+- [#5335](https://github.com/Effect-TS/effect/pull/5335) [`767e49e`](https://github.com/Effect-TS/effect/commit/767e49e38458d982517ce6d6b6f3f9147af5411a) Thanks @patroza! - fix: RpcGroup.prefix runtime error because of trying to array destructure the rpc object
+
+## 0.68.2
+
+### Patch Changes
+
+- [#5319](https://github.com/Effect-TS/effect/pull/5319) [`792e4cf`](https://github.com/Effect-TS/effect/commit/792e4cf049262da69651ba407ad2cf63cc68948c) Thanks @tim-smart! - fix Effect.gen compatibility with RpcMiddleware wrap option
+
+- Updated dependencies [[`5f98388`](https://github.com/Effect-TS/effect/commit/5f983881754fce7dc0e2d752145f3b865af27958)]:
+  - effect@3.17.5
+
+## 0.68.1
+
+### Patch Changes
+
+- [#5309](https://github.com/Effect-TS/effect/pull/5309) [`6e4d658`](https://github.com/Effect-TS/effect/commit/6e4d658bfa57fb04505a77ba3eac74ceaaabfc95) Thanks @tim-smart! - add http headers to rpc headers for http protocols
+
+## 0.68.0
+
+### Minor Changes
+
+- [#5264](https://github.com/Effect-TS/effect/pull/5264) [`e9cbd26`](https://github.com/Effect-TS/effect/commit/e9cbd2673401723aa811b0535202e4f57baf6d2c) Thanks @tim-smart! - add RpcClientError
+
+### Patch Changes
+
+- Updated dependencies [[`5a0f4f1`](https://github.com/Effect-TS/effect/commit/5a0f4f176687a39d9fa46bb894bb7ac3175b0e87)]:
+  - effect@3.17.1
+
+## 0.67.0
+
+### Patch Changes
+
+- Updated dependencies [[`7813640`](https://github.com/Effect-TS/effect/commit/7813640279d9e3a3e7fc0a29bfb5c6d5fb3c270f)]:
+  - @effect/platform@0.90.0
+
+## 0.66.0
+
+### Patch Changes
+
+- Updated dependencies [[`40c3c87`](https://github.com/Effect-TS/effect/commit/40c3c875f724264312b43002859c82bed9ad0df9), [`ed2c74a`](https://github.com/Effect-TS/effect/commit/ed2c74ae8fa4ea0dd06ea84a3e58cd32e6916104), [`073a1b8`](https://github.com/Effect-TS/effect/commit/073a1b8be5dbfa87454393ee7346f5bc36a4fd63), [`f382e99`](https://github.com/Effect-TS/effect/commit/f382e99e409838a879246250fc3994b9bf5b3c2c), [`e8c7ba5`](https://github.com/Effect-TS/effect/commit/e8c7ba5fd3eb0c3ae3039fc24c09d69391987989), [`7e10415`](https://github.com/Effect-TS/effect/commit/7e1041599ade25103428703f5d2dfd7378a09636), [`e9bdece`](https://github.com/Effect-TS/effect/commit/e9bdececdc24f60a246be5055eca71a0d49ea7f2), [`8d95eb0`](https://github.com/Effect-TS/effect/commit/8d95eb0356b1d1736204836c275d201a547d208d)]:
+  - effect@3.17.0
+  - @effect/platform@0.89.0
+
+## 0.65.2
+
+### Patch Changes
+
+- [#5218](https://github.com/Effect-TS/effect/pull/5218) [`0dfc724`](https://github.com/Effect-TS/effect/commit/0dfc7246bdc28176026838c598ef41ddd693c064) Thanks @tim-smart! - ensure rpc stdio protocol interrupts parent fiber when stdin ends
+
+## 0.65.1
+
+### Patch Changes
+
+- Updated dependencies [[`f5dfabf`](https://github.com/Effect-TS/effect/commit/f5dfabf51ba481a4468c1509c537314978ef6cec), [`17a5ea8`](https://github.com/Effect-TS/effect/commit/17a5ea8fa29785fe6e4c9480f2a2e9c8c59f3f38), [`d25f22b`](https://github.com/Effect-TS/effect/commit/d25f22be7598abe977caf6cdac3b0dd78b438c48)]:
+  - effect@3.16.14
+  - @effect/platform@0.88.1
+
+## 0.65.0
+
+### Patch Changes
+
+- Updated dependencies [[`27206d7`](https://github.com/Effect-TS/effect/commit/27206d7f0558d7fe28de57bf54f1d0cc83acc92e), [`dbabf5e`](https://github.com/Effect-TS/effect/commit/dbabf5e76fa63b050d2b6c466713c7dc59f07d3c)]:
+  - @effect/platform@0.88.0
+
+## 0.64.14
+
+### Patch Changes
+
+- [#5204](https://github.com/Effect-TS/effect/pull/5204) [`5b7cd92`](https://github.com/Effect-TS/effect/commit/5b7cd923e786c38a0802faf0fe75498ab3cccf28) Thanks @tim-smart! - ensure RpcMiddleware failures are reflected in RpcClient
+
+- Updated dependencies [[`c1c05a8`](https://github.com/Effect-TS/effect/commit/c1c05a8242fb5df7445b4a12387a60eac7726eb7), [`81fe4a2`](https://github.com/Effect-TS/effect/commit/81fe4a2c81d5e30e180a60e68c52016a27b350db)]:
+  - effect@3.16.13
+  - @effect/platform@0.87.13
+
+## 0.64.13
+
+### Patch Changes
+
+- Updated dependencies [[`32ba77a`](https://github.com/Effect-TS/effect/commit/32ba77ae304d2161362a73e8b61965332626cf2d), [`d5e25b2`](https://github.com/Effect-TS/effect/commit/d5e25b237f05670ee42b386cb40b2cb448fc11d7)]:
+  - @effect/platform@0.87.12
+
+## 0.64.12
+
+### Patch Changes
+
+- [#5183](https://github.com/Effect-TS/effect/pull/5183) [`79a1947`](https://github.com/Effect-TS/effect/commit/79a1947359cbd89a47ea315cdd86a3d250f28f43) Thanks @tim-smart! - allow RpcMessage spans to be missing
+
+- Updated dependencies [[`001392b`](https://github.com/Effect-TS/effect/commit/001392ba8bfcad101bb034348a7415012fb12f72), [`7bfb099`](https://github.com/Effect-TS/effect/commit/7bfb099cb5528511b8d63045c4fbb4dc9cb18528)]:
+  - @effect/platform@0.87.11
+
+## 0.64.11
+
+### Patch Changes
+
+- Updated dependencies [[`678318d`](https://github.com/Effect-TS/effect/commit/678318d2e88233156b006acda56c2d138ee3ffa0), [`678318d`](https://github.com/Effect-TS/effect/commit/678318d2e88233156b006acda56c2d138ee3ffa0)]:
+  - @effect/platform@0.87.10
+
+## 0.64.10
+
+### Patch Changes
+
+- Updated dependencies [[`54514a2`](https://github.com/Effect-TS/effect/commit/54514a2f53166de27ad7e756dbf12194691fd4af)]:
+  - @effect/platform@0.87.9
+
+## 0.64.9
+
+### Patch Changes
+
+- Updated dependencies [[`4ce4f82`](https://github.com/Effect-TS/effect/commit/4ce4f824f6fdef492be1d35c05a490ffce518c89)]:
+  - @effect/platform@0.87.8
+
+## 0.64.8
+
+### Patch Changes
+
+- Updated dependencies [[`a9b617f`](https://github.com/Effect-TS/effect/commit/a9b617f125171ed76cd79ab46d7a924daf3b0e70), [`7e26e86`](https://github.com/Effect-TS/effect/commit/7e26e86524abcc93713d6ad7eee486638c98f7c2)]:
+  - @effect/platform@0.87.7
+
+## 0.64.7
+
+### Patch Changes
+
+- Updated dependencies [[`905da99`](https://github.com/Effect-TS/effect/commit/905da996aad665057b4ca6dba1a4af44fb8835bd)]:
+  - effect@3.16.12
+  - @effect/platform@0.87.6
+
+## 0.64.6
+
+### Patch Changes
+
+- Updated dependencies [[`2fd8676`](https://github.com/Effect-TS/effect/commit/2fd8676c803cd40000dfc3231f5daecaa0e0ebd2)]:
+  - @effect/platform@0.87.5
+
+## 0.64.5
+
+### Patch Changes
+
+- Updated dependencies [[`e82a4fd`](https://github.com/Effect-TS/effect/commit/e82a4fd60f6528d08cef1a4aba0abe0d3ba741ad)]:
+  - @effect/platform@0.87.4
+
+## 0.64.4
+
+### Patch Changes
+
+- Updated dependencies [[`1b6e396`](https://github.com/Effect-TS/effect/commit/1b6e396d699f3cbbc56b68f99055cf746529bb9e)]:
+  - @effect/platform@0.87.3
+
+## 0.64.3
+
+### Patch Changes
+
+- Updated dependencies [[`4fea68c`](https://github.com/Effect-TS/effect/commit/4fea68ca7a25a3c39a1ab68b3885534513ab0c81), [`b927954`](https://github.com/Effect-TS/effect/commit/b9279543cf5688dd8a577af80456959c615217d0), [`99590a6`](https://github.com/Effect-TS/effect/commit/99590a6ca9128eb1ede265b6670b655311995614), [`6c3e24c`](https://github.com/Effect-TS/effect/commit/6c3e24c2308f7d4a29b8f4270ab81bca22ac6bb4)]:
+  - @effect/platform@0.87.2
+  - effect@3.16.11
+
+## 0.64.2
+
+### Patch Changes
+
+- Updated dependencies [[`faad30e`](https://github.com/Effect-TS/effect/commit/faad30ec8742916be59f9db642d0fc98225b636c)]:
+  - effect@3.16.10
+  - @effect/platform@0.87.1
+
+## 0.64.1
+
+### Patch Changes
+
+- [#5098](https://github.com/Effect-TS/effect/pull/5098) [`112a93a`](https://github.com/Effect-TS/effect/commit/112a93a9bab73e95e79f7b3502d1a7b1acd668fc) Thanks @tim-smart! - add flatten options to RpcClient constructors
+
+## 0.64.0
+
+### Patch Changes
+
+- [#5086](https://github.com/Effect-TS/effect/pull/5086) [`867919c`](https://github.com/Effect-TS/effect/commit/867919c8be9a2f770699c0db852a3f566017ffd6) Thanks @tim-smart! - add RpcGroup.prefix, and allow for namespacing rpcs using a `group.method` convention
+
+- Updated dependencies [[`b5bac9a`](https://github.com/Effect-TS/effect/commit/b5bac9ac2913fcd11b02322624f03b544eef53ba)]:
+  - @effect/platform@0.87.0
+
+## 0.63.0
+
+### Patch Changes
+
+- Updated dependencies [[`5137c70`](https://github.com/Effect-TS/effect/commit/5137c703461d8d3b363c112140a6e7f798241d07), [`c23d25c`](https://github.com/Effect-TS/effect/commit/c23d25c3e7c541f1f63b28484d8c461d86c67e99), [`5137c70`](https://github.com/Effect-TS/effect/commit/5137c703461d8d3b363c112140a6e7f798241d07), [`5137c70`](https://github.com/Effect-TS/effect/commit/5137c703461d8d3b363c112140a6e7f798241d07)]:
+  - effect@3.16.9
+  - @effect/platform@0.86.0
+
+## 0.62.4
+
+### Patch Changes
+
+- [#5056](https://github.com/Effect-TS/effect/pull/5056) [`a8d99b2`](https://github.com/Effect-TS/effect/commit/a8d99b2ec2f55d9aa6e7d00a5138e80380716877) Thanks @tim-smart! - expose the clientId in RpcMiddleware
+
+## 0.62.3
+
+### Patch Changes
+
+- Updated dependencies [[`914a191`](https://github.com/Effect-TS/effect/commit/914a191e7cb6341a3d0e965bccd27c336cf22e44)]:
+  - @effect/platform@0.85.2
+
+## 0.62.2
+
+### Patch Changes
+
+- [#5049](https://github.com/Effect-TS/effect/pull/5049) [`ddfd1e4`](https://github.com/Effect-TS/effect/commit/ddfd1e43db60e3b779d18a221344423c5f3c7416) Thanks @tim-smart! - fix RpcClient payload for tagged requests
+
+## 0.62.1
+
+### Patch Changes
+
+- Updated dependencies [[`8cb98d5`](https://github.com/Effect-TS/effect/commit/8cb98d53e68330228287ce2a2e0d8a4c86bcab3b), [`db2dd3c`](https://github.com/Effect-TS/effect/commit/db2dd3c3a8a77d791eae19e66153527e1cde4e6e)]:
+  - effect@3.16.8
+  - @effect/platform@0.85.1
+
+## 0.62.0
+
+### Patch Changes
+
+- Updated dependencies [[`93687dd`](https://github.com/Effect-TS/effect/commit/93687ddbb25ce3b324cd2b83d2ccff225e97307e), [`93687dd`](https://github.com/Effect-TS/effect/commit/93687ddbb25ce3b324cd2b83d2ccff225e97307e), [`93687dd`](https://github.com/Effect-TS/effect/commit/93687ddbb25ce3b324cd2b83d2ccff225e97307e)]:
+  - @effect/platform@0.85.0
+
+## 0.61.15
+
+### Patch Changes
+
+- [#5036](https://github.com/Effect-TS/effect/pull/5036) [`cbac1ac`](https://github.com/Effect-TS/effect/commit/cbac1ac61a4e15ad15828563b39eef412bcee66e) Thanks @tim-smart! - add .of helpers to RpcGroup, Entity and AiToolkit
+
+- Updated dependencies [[`1bb0d8a`](https://github.com/Effect-TS/effect/commit/1bb0d8ab96782e99434356266b38251554ea0294)]:
+  - effect@3.16.7
+  - @effect/platform@0.84.11
+
+## 0.61.14
+
+### Patch Changes
+
+- Updated dependencies [[`a5f7595`](https://github.com/Effect-TS/effect/commit/a5f75956ef9a15a83c416517ef493f0ee2f5ee8a), [`a02470c`](https://github.com/Effect-TS/effect/commit/a02470c75579e91525a25adb3f21b3650d042fdd), [`bf369b2`](https://github.com/Effect-TS/effect/commit/bf369b2902a0e0b195d957c18b9efd180942cf8b), [`f891d45`](https://github.com/Effect-TS/effect/commit/f891d45adffdafd3f94a2eca23faa354e3a409a8)]:
+  - effect@3.16.6
+  - @effect/platform@0.84.10
+
+## 0.61.13
+
+### Patch Changes
+
+- [#4623](https://github.com/Effect-TS/effect/pull/4623) [`ee3a197`](https://github.com/Effect-TS/effect/commit/ee3a1973f54d7611ae99979edfed3020e94e1126) Thanks @tim-smart! - add RpcSerialization.jsonRpc & RpcSerialization.ndJsonRpc
+
+- [#4623](https://github.com/Effect-TS/effect/pull/4623) [`ee3a197`](https://github.com/Effect-TS/effect/commit/ee3a1973f54d7611ae99979edfed3020e94e1126) Thanks @tim-smart! - support primitives in rpc payloads
+
+## 0.61.12
+
+### Patch Changes
+
+- [#5023](https://github.com/Effect-TS/effect/pull/5023) [`e0d3d42`](https://github.com/Effect-TS/effect/commit/e0d3d424d8f4e6a8ada017160406991f02b3c068) Thanks @tim-smart! - add spanAttributes option to RpcServer constructors
+
+## 0.61.11
+
+### Patch Changes
+
+- [#4750](https://github.com/Effect-TS/effect/pull/4750) [`dca92fd`](https://github.com/Effect-TS/effect/commit/dca92fd8cf41f07561f55d863def5a9f62275f53) Thanks @tim-smart! - add disableFatalDefects option to cluster entities
+
+## 0.61.10
+
+### Patch Changes
+
+- Updated dependencies [[`bf418ef`](https://github.com/Effect-TS/effect/commit/bf418ef14a0f2ec965535793d5cea8fa8ba177ac)]:
+  - effect@3.16.5
+  - @effect/platform@0.84.9
+
+## 0.61.9
+
+### Patch Changes
+
+- [#5014](https://github.com/Effect-TS/effect/pull/5014) [`7bf6cb9`](https://github.com/Effect-TS/effect/commit/7bf6cb943810e403f472a901ed29ccbbf76a46b2) Thanks @tim-smart! - fix rpc middleware error schemas
+
+- [#5014](https://github.com/Effect-TS/effect/pull/5014) [`7bf6cb9`](https://github.com/Effect-TS/effect/commit/7bf6cb943810e403f472a901ed29ccbbf76a46b2) Thanks @tim-smart! - add ping timeouts to RpcClient
+
+## 0.61.8
+
+### Patch Changes
+
+- Updated dependencies [[`8b9db77`](https://github.com/Effect-TS/effect/commit/8b9db7742846af0f58fd8e8b7acb7f4f5ff487ec)]:
+  - @effect/platform@0.84.8
+
+## 0.61.7
+
+### Patch Changes
+
+- Updated dependencies [[`74ab9a0`](https://github.com/Effect-TS/effect/commit/74ab9a0a9e16d6e019369d256e1e24175c8bc3f3), [`770008e`](https://github.com/Effect-TS/effect/commit/770008eca3aad2899a2ed951236e575793294b28)]:
+  - effect@3.16.4
+  - @effect/platform@0.84.7
+
+## 0.61.6
+
+### Patch Changes
+
+- Updated dependencies [[`ceea77a`](https://github.com/Effect-TS/effect/commit/ceea77a13055f145520f763e3fce5b8ff15d728f)]:
+  - @effect/platform@0.84.6
+
+## 0.61.5
+
+### Patch Changes
+
+- [#4967](https://github.com/Effect-TS/effect/pull/4967) [`71e1e6c`](https://github.com/Effect-TS/effect/commit/71e1e6c535c11a3ec498540a3af3c1a313a5319b) Thanks @tim-smart! - fix RpcClient error types when using discard
+
+- Updated dependencies [[`ec52c6a`](https://github.com/Effect-TS/effect/commit/ec52c6a2211e76972462b15b9d5a9d6d56761b7a)]:
+  - @effect/platform@0.84.5
+
+## 0.61.4
+
+### Patch Changes
+
+- [#4945](https://github.com/Effect-TS/effect/pull/4945) [`a116aea`](https://github.com/Effect-TS/effect/commit/a116aeade97c83d8c96f17cdc5cf3b5a0bd9be74) Thanks @tim-smart! - add primaryKey option to Rpc.make
+
+- Updated dependencies [[`87722fc`](https://github.com/Effect-TS/effect/commit/87722fce693a9b49284bbddbf82d30714c688261), [`36217ee`](https://github.com/Effect-TS/effect/commit/36217eeb1337edd9ac3f9a635b80a6385d22ae8f)]:
+  - effect@3.16.3
+  - @effect/platform@0.84.4
+
+## 0.61.3
+
+### Patch Changes
+
+- Updated dependencies [[`ab7684f`](https://github.com/Effect-TS/effect/commit/ab7684f1c2a0671bf091f255d220e3a4cc7f528e)]:
+  - @effect/platform@0.84.3
+
+## 0.61.2
+
+### Patch Changes
+
+- [#4939](https://github.com/Effect-TS/effect/pull/4939) [`a77afb1`](https://github.com/Effect-TS/effect/commit/a77afb1f7191a57a68b09fcdee5e9f27a0682b0a) Thanks @tim-smart! - allow Rpc to be extended to create opaque types
+
+- Updated dependencies [[`0ddf148`](https://github.com/Effect-TS/effect/commit/0ddf148a247aa87af043d276b8453a714a400897)]:
+  - effect@3.16.2
+  - @effect/platform@0.84.2
+
+## 0.61.1
+
+### Patch Changes
+
+- Updated dependencies [[`71174d0`](https://github.com/Effect-TS/effect/commit/71174d09691314a9b6b66189e456fd21e3eb6543), [`d615e6e`](https://github.com/Effect-TS/effect/commit/d615e6e5b944f6fd5e627e31752c7ca7e4e1c17d)]:
+  - @effect/platform@0.84.1
+  - effect@3.16.1
+
+## 0.61.0
+
+### Patch Changes
+
+- Updated dependencies [[`ee0bd5d`](https://github.com/Effect-TS/effect/commit/ee0bd5d24864752c54cb359f67a67dd903971ec4), [`5189800`](https://github.com/Effect-TS/effect/commit/51898004e11766b8cf6d95e960b636f6d5db79ec), [`58bfeaa`](https://github.com/Effect-TS/effect/commit/58bfeaa64ded8c88f772b184311c0c0dbac10960), [`194d748`](https://github.com/Effect-TS/effect/commit/194d7486943f56f3267ef415395ac220a4b3e634), [`918c9ea`](https://github.com/Effect-TS/effect/commit/918c9ea1a57facb154f0fb26792021f337054dee), [`9198e6f`](https://github.com/Effect-TS/effect/commit/9198e6fcc1a3ff4fefb3363004de558d8de01f40), [`2a370bf`](https://github.com/Effect-TS/effect/commit/2a370bf625fdeede5659721468eb0d527e403279), [`58ccb91`](https://github.com/Effect-TS/effect/commit/58ccb91328c8df5d49808b673738bc09df355201), [`fd47834`](https://github.com/Effect-TS/effect/commit/fd478348203fa89462b0a1d067ce4de034353df4)]:
+  - effect@3.16.0
+  - @effect/platform@0.84.0
+
+## 0.60.0
+
+### Patch Changes
+
+- Updated dependencies [[`5522520`](https://github.com/Effect-TS/effect/commit/55225206ab9af0ad60b1c0654690a8a096d625cd), [`cc5bb2b`](https://github.com/Effect-TS/effect/commit/cc5bb2b918a9450a975f702dabcea891bda382cb)]:
+  - @effect/platform@0.83.0
+  - effect@3.15.5
+
+## 0.59.9
+
+### Patch Changes
+
+- Updated dependencies [[`0617b9d`](https://github.com/Effect-TS/effect/commit/0617b9dc365f1963b36949ad7f9023ab6eb94524)]:
+  - @effect/platform@0.82.8
+
+## 0.59.8
+
+### Patch Changes
+
+- Updated dependencies [[`f570554`](https://github.com/Effect-TS/effect/commit/f57055459524587b041340577dad85476bb35f81), [`78047e8`](https://github.com/Effect-TS/effect/commit/78047e8dfc8005b66f87afe50bb95981fea51561), [`c20b95a`](https://github.com/Effect-TS/effect/commit/c20b95a99ffe452b4774c844d397a905f713b6d6), [`94ada43`](https://github.com/Effect-TS/effect/commit/94ada430928d5685bdbef513e87562c20774a3a2)]:
+  - effect@3.15.4
+  - @effect/platform@0.82.7
+
+## 0.59.7
+
+### Patch Changes
+
+- Updated dependencies [[`618903b`](https://github.com/Effect-TS/effect/commit/618903ba9ae96e2bfe6ee31f61c4359b915f2a36)]:
+  - @effect/platform@0.82.6
+
+## 0.59.6
+
+### Patch Changes
+
+- Updated dependencies [[`7764a07`](https://github.com/Effect-TS/effect/commit/7764a07d960c60df81f14e1dc949518f4bbe494a), [`4577f54`](https://github.com/Effect-TS/effect/commit/4577f548d67273e576cdde423bdd34a4b910766a), [`30a0d9c`](https://github.com/Effect-TS/effect/commit/30a0d9cb51c84290d51b1361d72ff5cee33c13c7)]:
+  - @effect/platform@0.82.5
+  - effect@3.15.3
+
+## 0.59.5
+
+### Patch Changes
+
+- Updated dependencies [[`d45e8a8`](https://github.com/Effect-TS/effect/commit/d45e8a8ac8227192f504e39e6d04fdcf4fb1d225), [`d13b68e`](https://github.com/Effect-TS/effect/commit/d13b68e3a9456d0bfee9bca8273a7b44a9c69087)]:
+  - @effect/platform@0.82.4
+
+## 0.59.4
+
+### Patch Changes
+
+- Updated dependencies [[`b8722b8`](https://github.com/Effect-TS/effect/commit/b8722b817e2306fe8c8245f3f9e32d85b824b961), [`a328f4b`](https://github.com/Effect-TS/effect/commit/a328f4b4fe717dd53e5b04a30f387433c32f7328)]:
+  - effect@3.15.2
+  - @effect/platform@0.82.3
+
+## 0.59.3
+
+### Patch Changes
+
+- Updated dependencies [[`739a3d4`](https://github.com/Effect-TS/effect/commit/739a3d4a4565915fe2e690003f4f9085cb4422fc)]:
+  - @effect/platform@0.82.2
+
+## 0.59.2
+
+### Patch Changes
+
+- Updated dependencies [[`787ce70`](https://github.com/Effect-TS/effect/commit/787ce7042e35b657963473c6efe47752868cd811), [`1269641`](https://github.com/Effect-TS/effect/commit/1269641a99ae43069f7648ff79ffe8729b54b348), [`1269641`](https://github.com/Effect-TS/effect/commit/1269641a99ae43069f7648ff79ffe8729b54b348)]:
+  - effect@3.15.1
+  - @effect/platform@0.82.1
+
+## 0.59.1
+
+### Patch Changes
+
+- [#4860](https://github.com/Effect-TS/effect/pull/4860) [`6495440`](https://github.com/Effect-TS/effect/commit/64954405eb57313722023b87c0d92761980e2713) Thanks @tim-smart! - ensure socket close events are not errors in RpcServer
+
+## 0.59.0
+
+### Patch Changes
+
+- Updated dependencies [[`c654595`](https://github.com/Effect-TS/effect/commit/c65459587b51da140b78098e81fdbfece65d53e2), [`d9f5dea`](https://github.com/Effect-TS/effect/commit/d9f5deae0f02f5de2b9fcb1cca8b142ba4bc2bba), [`49aa723`](https://github.com/Effect-TS/effect/commit/49aa7236a15e13f818c86edbca08c4af67c8dfaf), [`74c14d0`](https://github.com/Effect-TS/effect/commit/74c14d01d0cb48cf517a1b6e29a373a96ed0ff5b), [`e4f49b6`](https://github.com/Effect-TS/effect/commit/e4f49b66857e01b74ab6a9a0bc7132f44cd04cbb), [`6f02224`](https://github.com/Effect-TS/effect/commit/6f02224b3fc46a682ad2defb1a260841956c6780), [`1dcfd41`](https://github.com/Effect-TS/effect/commit/1dcfd41ff96abd706901293a00c1893cb29dd8fd), [`b21ab16`](https://github.com/Effect-TS/effect/commit/b21ab16b6f773e7ec4369db4e752c35e719f7870), [`fcf1822`](https://github.com/Effect-TS/effect/commit/fcf1822f98fcda60351d64e9d2c2c13563d7e6db), [`0061dd1`](https://github.com/Effect-TS/effect/commit/0061dd140740165e91569a684cce27a77b23229e), [`8421e6e`](https://github.com/Effect-TS/effect/commit/8421e6e49332bca8f96f482dfd48680e238b3a89), [`a9b3fb7`](https://github.com/Effect-TS/effect/commit/a9b3fb78abcfdb525318a956fd02fcadeb56143e), [`fa10f56`](https://github.com/Effect-TS/effect/commit/fa10f56b96bd9af070ba99ebc3279aa93954261e)]:
+  - effect@3.15.0
+  - @effect/platform@0.82.0
+
+## 0.58.0
+
+### Minor Changes
+
+- [#4858](https://github.com/Effect-TS/effect/pull/4858) [`cd6cd0e`](https://github.com/Effect-TS/effect/commit/cd6cd0eacd6b09d6dd48b30b32edeb4a3c3075f9) Thanks @tim-smart! - add apis for implementing and accessing single rpc handlers
+
+## 0.57.1
+
+### Patch Changes
+
+- Updated dependencies [[`24a9ebb`](https://github.com/Effect-TS/effect/commit/24a9ebbb5af598f0bfd6ecc45307e528043fe011)]:
+  - effect@3.14.22
+  - @effect/platform@0.81.1
+
+## 0.57.0
+
+### Patch Changes
+
+- Updated dependencies [[`672920f`](https://github.com/Effect-TS/effect/commit/672920f85da8abd5f9d4ad85e29248a2aca57ed8)]:
+  - @effect/platform@0.81.0
+
+## 0.56.9
+
+### Patch Changes
+
+- Updated dependencies [[`2f3b7d4`](https://github.com/Effect-TS/effect/commit/2f3b7d4e1fa1ef8790b0ca4da22eb88872ee31df)]:
+  - effect@3.14.21
+  - @effect/platform@0.80.21
+
+## 0.56.8
+
+### Patch Changes
+
+- Updated dependencies [[`17e2f30`](https://github.com/Effect-TS/effect/commit/17e2f3091408cf0fca9414d4af3bdf7b2765b378)]:
+  - effect@3.14.20
+  - @effect/platform@0.80.20
+
+## 0.56.7
+
+### Patch Changes
+
+- Updated dependencies [[`056a910`](https://github.com/Effect-TS/effect/commit/056a910d0a0b8b00b0dc9df4a070466b2b5c2f6c), [`e25e7bb`](https://github.com/Effect-TS/effect/commit/e25e7bbc1797733916f48f501425d9f2ef310d9f), [`3273d57`](https://github.com/Effect-TS/effect/commit/3273d572c2b3175a842677f19efeea4cd65ab016)]:
+  - effect@3.14.19
+  - @effect/platform@0.80.19
+
+## 0.56.6
+
+### Patch Changes
+
+- Updated dependencies [[`b1164d4`](https://github.com/Effect-TS/effect/commit/b1164d49a1dfdf299e9971367b6fc6be4df0ddff)]:
+  - effect@3.14.18
+  - @effect/platform@0.80.18
+
+## 0.56.5
+
+### Patch Changes
+
+- Updated dependencies [[`0b54681`](https://github.com/Effect-TS/effect/commit/0b54681cd89245e211d8f49272be0f1bf2f81813), [`41a59d5`](https://github.com/Effect-TS/effect/commit/41a59d5916a296b12b0d5ead9e859e05f40b4cce)]:
+  - effect@3.14.17
+  - @effect/platform@0.80.17
+
+## 0.56.4
+
+### Patch Changes
+
+- Updated dependencies [[`ee14444`](https://github.com/Effect-TS/effect/commit/ee144441021ec77039e43396eaf90714687bb495), [`f1c8583`](https://github.com/Effect-TS/effect/commit/f1c8583f8c3ea9415f813795ca2940a897c9ba9a)]:
+  - effect@3.14.16
+  - @effect/platform@0.80.16
+
+## 0.56.3
+
+### Patch Changes
+
+- Updated dependencies [[`239cc99`](https://github.com/Effect-TS/effect/commit/239cc995ce645946210a3c3d2cb52bd3547c0687), [`8b6c947`](https://github.com/Effect-TS/effect/commit/8b6c947eaa8e45a67ecb3c37d45cd27f3e41d165), [`c50a63b`](https://github.com/Effect-TS/effect/commit/c50a63bbecb9f560b9cae349c447eed877d1b9b6)]:
+  - effect@3.14.15
+  - @effect/platform@0.80.15
+
+## 0.56.2
+
+### Patch Changes
+
+- Updated dependencies [[`6ed8d15`](https://github.com/Effect-TS/effect/commit/6ed8d1589beb181d30abc79afebdaabc1d101538)]:
+  - effect@3.14.14
+  - @effect/platform@0.80.14
+
+## 0.56.1
+
+### Patch Changes
+
+- Updated dependencies [[`ee77788`](https://github.com/Effect-TS/effect/commit/ee77788747e7ebbde6bfa88256cde49dbbad3608), [`5fce6ba`](https://github.com/Effect-TS/effect/commit/5fce6ba19c3cc63cc0104e737e581ad989dedbf0), [`570e45f`](https://github.com/Effect-TS/effect/commit/570e45f8cb936e42ec48f67f21bb2b7252f36c0c)]:
+  - effect@3.14.13
+  - @effect/platform@0.80.13
+
+## 0.56.0
+
+### Minor Changes
+
+- [#4771](https://github.com/Effect-TS/effect/pull/4771) [`2c66c16`](https://github.com/Effect-TS/effect/commit/2c66c16375dc2fe128f7b4e78c5f5c27c25c0d19) Thanks @tim-smart! - add option to RpcClient socket protocol to retry transient errors
+
+### Patch Changes
+
+- [#4764](https://github.com/Effect-TS/effect/pull/4764) [`d6e1156`](https://github.com/Effect-TS/effect/commit/d6e115617fc1a26a846b55f407965a330145dbee) Thanks @mattiamanzati! - add wrap option to RpcMiddleware
+
+## 0.55.17
+
+### Patch Changes
+
+- Updated dependencies [[`c2ad9ee`](https://github.com/Effect-TS/effect/commit/c2ad9ee9f3c4c743390edf35ed9e85a20be33811), [`9c68654`](https://github.com/Effect-TS/effect/commit/9c686542b6eb3ea188cb70673ef2e41223633e89)]:
+  - effect@3.14.12
+  - @effect/platform@0.80.12
+
+## 0.55.16
+
+### Patch Changes
+
+- [#4758](https://github.com/Effect-TS/effect/pull/4758) [`b5ad11e`](https://github.com/Effect-TS/effect/commit/b5ad11e511424c6d5c32e34e7ee9d04f0110617d) Thanks @tim-smart! - convert encoded request ids to strings
+
+- Updated dependencies [[`e536127`](https://github.com/Effect-TS/effect/commit/e536127c1e6f2fb3a542c73ae919435a629a346b)]:
+  - effect@3.14.11
+  - @effect/platform@0.80.11
+
+## 0.55.15
+
+### Patch Changes
+
+- [#4754](https://github.com/Effect-TS/effect/pull/4754) [`d3df84e`](https://github.com/Effect-TS/effect/commit/d3df84e8af8e00a297e2329faeae625de0a95a71) Thanks @tim-smart! - fix RpcClient worker protocol scopes
+
+## 0.55.14
+
+### Patch Changes
+
+- Updated dependencies [[`bc7efa3`](https://github.com/Effect-TS/effect/commit/bc7efa3b031bb25e1ed3c8f2d3fb5e8da166cadc)]:
+  - effect@3.14.10
+  - @effect/platform@0.80.10
+
+## 0.55.13
+
+### Patch Changes
+
+- Updated dependencies [[`d78249f`](https://github.com/Effect-TS/effect/commit/d78249f0b67f63cf4baf806ff090cba33293daf0)]:
+  - effect@3.14.9
+  - @effect/platform@0.80.9
+
+## 0.55.12
+
+### Patch Changes
+
+- [#4725](https://github.com/Effect-TS/effect/pull/4725) [`58eaca9`](https://github.com/Effect-TS/effect/commit/58eaca9ef14032fc310f4a0e3c09513bac1cb50a) Thanks @leonitousconforti! - Update RPC README.md example
+
+## 0.55.11
+
+### Patch Changes
+
+- Updated dependencies [[`b3a2d32`](https://github.com/Effect-TS/effect/commit/b3a2d32772e6f7f20eacf2e18128e99324c4d378)]:
+  - effect@3.14.8
+  - @effect/platform@0.80.8
+
+## 0.55.10
+
+### Patch Changes
+
+- Updated dependencies [[`b542a4b`](https://github.com/Effect-TS/effect/commit/b542a4bf195be0c9af1523e1ba96c953decc4d25)]:
+  - effect@3.14.7
+  - @effect/platform@0.80.7
+
+## 0.55.9
+
+### Patch Changes
+
+- [#4703](https://github.com/Effect-TS/effect/pull/4703) [`a1d4673`](https://github.com/Effect-TS/effect/commit/a1d4673a423dfed050c0a762664d9d64002cfa90) Thanks @tim-smart! - improve RpcServer schema defects
+
+## 0.55.8
+
+### Patch Changes
+
+- Updated dependencies [[`47618c1`](https://github.com/Effect-TS/effect/commit/47618c1ad84ebcc5a51133a3fff5aa5012d49d45), [`6077882`](https://github.com/Effect-TS/effect/commit/60778824a4794336c33807801f813f8751d1c7e4)]:
+  - effect@3.14.6
+  - @effect/platform@0.80.6
+
+## 0.55.7
+
+### Patch Changes
+
+- [#4690](https://github.com/Effect-TS/effect/pull/4690) [`4414042`](https://github.com/Effect-TS/effect/commit/44140423a2fb185f92f7db4d5b383f9b62a97bf9) Thanks @tim-smart! - fix assignability in RpcGroup.merge
+
+## 0.55.6
+
+### Patch Changes
+
+- Updated dependencies [[`40dbfef`](https://github.com/Effect-TS/effect/commit/40dbfeff239b6e567706752114f31b2fce7de4e3), [`85fba81`](https://github.com/Effect-TS/effect/commit/85fba815ac07eb13d4227a69ac76a18e4b94df18), [`5a5ebdd`](https://github.com/Effect-TS/effect/commit/5a5ebdddfaddd259538b4599a6676281faca778e)]:
+  - effect@3.14.5
+  - @effect/platform@0.80.5
+
+## 0.55.5
+
+### Patch Changes
+
+- [#4677](https://github.com/Effect-TS/effect/pull/4677) [`e3e5873`](https://github.com/Effect-TS/effect/commit/e3e5873f30080bb0e5eed8a876170acaa6ed47ff) Thanks @tim-smart! - allow RpcGroup.merge to accept multiple groups
+
+- [#4678](https://github.com/Effect-TS/effect/pull/4678) [`26c060c`](https://github.com/Effect-TS/effect/commit/26c060c65914a623220a20356991784f974bfe18) Thanks @tim-smart! - remove trailing slash from rpc http requests
+
+- Updated dependencies [[`e4ba2c6`](https://github.com/Effect-TS/effect/commit/e4ba2c66a878e81b5e295d6d49aaf724b80a28ef)]:
+  - effect@3.14.4
+  - @effect/platform@0.80.4
+
+## 0.55.4
+
+### Patch Changes
+
+- [#4672](https://github.com/Effect-TS/effect/pull/4672) [`0ec5e03`](https://github.com/Effect-TS/effect/commit/0ec5e0353a1db5d27c3500deba0df61001258e76) Thanks @tim-smart! - ensure RpcClient does not miss chunks
+
+- [#4671](https://github.com/Effect-TS/effect/pull/4671) [`05c4d77`](https://github.com/Effect-TS/effect/commit/05c4d772acc42b7425add7b22f914c5ee3ff84bd) Thanks @tim-smart! - ensure RpcClient fiber is defined before polling
+
+- Updated dependencies [[`37aa8e1`](https://github.com/Effect-TS/effect/commit/37aa8e137725a902e70cd1e468ea98b873aa5056), [`34f03d6`](https://github.com/Effect-TS/effect/commit/34f03d66875f21f266f102223a03cd14c2ed6ea6)]:
+  - effect@3.14.3
+  - @effect/platform@0.80.3
+
+## 0.55.3
+
+### Patch Changes
+
+- Updated dependencies [[`f87991b`](https://github.com/Effect-TS/effect/commit/f87991b6d8a2edfaf90b01cebda4b466992ae865), [`f87991b`](https://github.com/Effect-TS/effect/commit/f87991b6d8a2edfaf90b01cebda4b466992ae865), [`0a3e3e1`](https://github.com/Effect-TS/effect/commit/0a3e3e18eea5e0d1882f1a6c906198e6ef226a41)]:
+  - effect@3.14.2
+  - @effect/platform@0.80.2
+
 ## 0.55.2
 
 ### Patch Changes
@@ -1012,7 +1804,6 @@
 - [#3227](https://github.com/Effect-TS/effect/pull/3227) [`20807a4`](https://github.com/Effect-TS/effect/commit/20807a45edeb4334e903dca5d708cd62a71702d8) Thanks @gcanti! - ## Breaking Changes
 
   ### Rpc
-
   - align `StreamRequest` signature to `Schema.TaggedRequest` signature (`options` argument)
 
     from
@@ -2352,7 +3143,6 @@
 - [#2006](https://github.com/Effect-TS/effect/pull/2006) [`1a77f72`](https://github.com/Effect-TS/effect/commit/1a77f72cdaf43d6cdc91b6060f82832edcdbbcb3) Thanks [@github-actions](https://github.com/apps/github-actions)! - change `Effect` type parameters order from `Effect<R, E, A>` to `Effect<A, E = never, R = never>`
 
 - [#2006](https://github.com/Effect-TS/effect/pull/2006) [`a34dbdc`](https://github.com/Effect-TS/effect/commit/a34dbdc1552c73c1b612676f262a0c735ce444a7) Thanks [@github-actions](https://github.com/apps/github-actions)! - - Schema: change type parameters order from `Schema<R, I, A>` to `Schema<A, I = A, R = never>`
-
   - Serializable: change type parameters order from `Serializable<R, I, A>` to `Serializable<A, I, R>`
   - Class: change type parameters order from `Class<R, I, A, C, Self, Inherited>` to `Class<A, I, R, C, Self, Inherited>`
   - PropertySignature: change type parameters order from `PropertySignature<R, From, FromIsOptional, To, ToIsOptional>` to `PropertySignature<From, FromIsOptional, To, ToIsOptional, R = never>`
@@ -2552,7 +3342,6 @@
 ### Minor Changes
 
 - [#1842](https://github.com/Effect-TS/effect/pull/1842) [`7b2f874`](https://github.com/Effect-TS/effect/commit/7b2f8743d96753c3e24ac4cc6715a4a7f4a2ca0c) Thanks [@fubhy](https://github.com/fubhy)! - Schema: refactor `ParseResult` module:
-
   - add `Union` issue, and replace `UnionMember` with `Union`
   - add `Tuple` issue, and replace `Index` with `Tuple`
   - add `TypeLiteral` issue

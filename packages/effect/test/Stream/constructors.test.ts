@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertLeft, assertTrue, deepStrictEqual } from "@effect/vitest/utils"
 import * as Chunk from "effect/Chunk"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -12,9 +13,8 @@ import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
-import { assertFalse, assertLeft, assertTrue, deepStrictEqual } from "effect/test/util"
-import { chunkCoordination } from "effect/test/utils/coordination"
 import * as TestClock from "effect/TestClock"
+import { chunkCoordination } from "../utils/coordination.js"
 
 const chunkArb = <A>(
   arb: fc.Arbitrary<A>,
@@ -61,6 +61,7 @@ describe("Stream", () => {
   it.effect("finalizer - finalizer is not run if stream is not pulled", () =>
     Effect.gen(function*() {
       const ref = yield* (Ref.make(false))
+      // @effect-diagnostics-next-line floatingEffect:off
       yield* pipe(
         Stream.finalizer(Ref.set(ref, true)),
         Stream.toPull,

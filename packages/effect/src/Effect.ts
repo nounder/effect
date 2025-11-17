@@ -12,6 +12,7 @@ import type * as Deferred from "./Deferred.js"
 import type * as Duration from "./Duration.js"
 import type * as Either from "./Either.js"
 import type { Equivalence } from "./Equivalence.js"
+import type { ExecutionPlan } from "./ExecutionPlan.js"
 import type { ExecutionStrategy } from "./ExecutionStrategy.js"
 import type * as Exit from "./Exit.js"
 import type * as Fiber from "./Fiber.js"
@@ -32,6 +33,7 @@ import * as effect from "./internal/core-effect.js"
 import * as core from "./internal/core.js"
 import * as defaultServices from "./internal/defaultServices.js"
 import * as circular from "./internal/effect/circular.js"
+import * as internalExecutionPlan from "./internal/executionPlan.js"
 import * as fiberRuntime from "./internal/fiberRuntime.js"
 import * as layer from "./internal/layer.js"
 import * as option_ from "./internal/option.js"
@@ -47,7 +49,7 @@ import type * as MetricLabel from "./MetricLabel.js"
 import type * as Option from "./Option.js"
 import type { Pipeable } from "./Pipeable.js"
 import type { Predicate, Refinement } from "./Predicate.js"
-import type * as Random from "./Random.js"
+import * as Random from "./Random.js"
 import type * as Ref from "./Ref.js"
 import * as Request from "./Request.js"
 import type { RequestBlock } from "./RequestBlock.js"
@@ -60,7 +62,15 @@ import * as Scheduler from "./Scheduler.js"
 import type * as Scope from "./Scope.js"
 import type * as Supervisor from "./Supervisor.js"
 import type * as Tracer from "./Tracer.js"
-import type { Concurrency, Contravariant, Covariant, NoExcessProperties, NoInfer, NotFunction } from "./Types.js"
+import type {
+  Concurrency,
+  Contravariant,
+  Covariant,
+  EqualsWith,
+  NoExcessProperties,
+  NoInfer,
+  NotFunction
+} from "./Types.js"
 import type * as Unify from "./Unify.js"
 import { isGeneratorFunction, type YieldWrap } from "./Utils.js"
 
@@ -174,13 +184,13 @@ declare module "./Context.js" {
  * @category Models
  */
 declare module "./Either.js" {
-  interface Left<L, R> extends Effect<R, L> {
+  interface Left<E, A> extends Effect<A, E> {
     readonly _tag: "Left"
-    [Symbol.iterator](): EffectGenerator<Left<L, R>>
+    [Symbol.iterator](): EffectGenerator<Left<E, A>>
   }
-  interface Right<L, R> extends Effect<R, L> {
+  interface Right<E, A> extends Effect<A, E> {
     readonly _tag: "Right"
-    [Symbol.iterator](): EffectGenerator<Right<L, R>>
+    [Symbol.iterator](): EffectGenerator<Right<E, A>>
   }
   interface EitherUnifyIgnore {
     Effect?: true
@@ -245,6 +255,15 @@ export declare namespace Effect {
    * @category Effect Type Extractors
    */
   export type Success<T extends Effect<any, any, any>> = [T] extends [Effect<infer _A, infer _E, infer _R>] ? _A : never
+  /**
+   * @since 3.15.5
+   * @category Effect Type Extractors
+   */
+  export type AsEffect<T extends Effect<any, any, any>> = Effect<
+    T extends Effect<infer _A, infer _E, infer _R> ? _A : never,
+    T extends Effect<infer _A, infer _E, infer _R> ? _E : never,
+    T extends Effect<infer _A, infer _E, infer _R> ? _R : never
+  > extends infer Q ? Q : never
 }
 
 /**
@@ -3483,7 +3502,7 @@ export const catchAll: {
  * // Recover from all errors by examining the cause
  * const recovered = program.pipe(
  *   Effect.catchAllCause((cause) =>
- *     Cause.isFailType(cause)
+ *     Cause.isFailure(cause)
  *       ? Effect.succeed("Recovered from a regular error")
  *       : Effect.succeed("Recovered from a defect")
  *   )
@@ -3861,15 +3880,13 @@ export const catchSomeDefect: {
  * @category Error handling
  */
 export const catchTag: {
-  <K extends E extends { _tag: string } ? E["_tag"] : never, E, A1, E1, R1>(
-    k: K,
-    f: (e: NoInfer<Extract<E, { _tag: K }>>) => Effect<A1, E1, R1>
-  ): <A, R>(self: Effect<A, E, R>) => Effect<A1 | A, E1 | Exclude<E, { _tag: K }>, R1 | R>
-  <A, E, R, K extends E extends { _tag: string } ? E["_tag"] : never, R1, E1, A1>(
+  <E, const K extends RA.NonEmptyReadonlyArray<E extends { _tag: string } ? E["_tag"] : never>, A1, E1, R1>(
+    ...args: [...tags: K, f: (e: Extract<NoInfer<E>, { _tag: K[number] }>) => Effect<A1, E1, R1>]
+  ): <A, R>(self: Effect<A, E, R>) => Effect<A | A1, Exclude<E, { _tag: K[number] }> | E1, R | R1>
+  <A, E, R, const K extends RA.NonEmptyReadonlyArray<E extends { _tag: string } ? E["_tag"] : never>, A1, E1, R1>(
     self: Effect<A, E, R>,
-    k: K,
-    f: (e: Extract<E, { _tag: K }>) => Effect<A1, E1, R1>
-  ): Effect<A | A1, E1 | Exclude<E, { _tag: K }>, R | R1>
+    ...args: [...tags: K, f: (e: Extract<NoInfer<E>, { _tag: K[number] }>) => Effect<A1, E1, R1>]
+  ): Effect<A | A1, Exclude<E, { _tag: K[number] }> | E1, R | R1>
 } = effect.catchTag
 
 /**
@@ -4383,21 +4400,32 @@ export declare namespace Retry {
 export const retry: {
   <E, O extends NoExcessProperties<Retry.Options<E>, O>>(
     options: O
-  ): <A, R>(
-    self: Effect<A, E, R>
-  ) => Retry.Return<R, E, A, O>
-  <B, E, R1>(
-    policy: Schedule.Schedule<B, NoInfer<E>, R1>
-  ): <A, R>(self: Effect<A, E, R>) => Effect<A, E, R1 | R>
+  ): <A, R>(self: Effect<A, E, R>) => Retry.Return<R, E, A, O>
+  <B, E, R1>(policy: Schedule.Schedule<B, NoInfer<E>, R1>): <A, R>(self: Effect<A, E, R>) => Effect<A, E, R1 | R>
   <A, E, R, O extends NoExcessProperties<Retry.Options<E>, O>>(
     self: Effect<A, E, R>,
     options: O
   ): Retry.Return<R, E, A, O>
-  <A, E, R, B, R1>(
-    self: Effect<A, E, R>,
-    policy: Schedule.Schedule<B, E, R1>
-  ): Effect<A, E, R1 | R>
+  <A, E, R, B, R1>(self: Effect<A, E, R>, policy: Schedule.Schedule<B, NoInfer<E>, R1>): Effect<A, E, R1 | R>
 } = schedule_.retry_combined
+
+/**
+ * Apply an `ExecutionPlan` to the effect, which allows you to fallback to
+ * different resources in case of failure.
+ *
+ * @since 3.16.0
+ * @category Error handling
+ * @experimental
+ */
+export const withExecutionPlan: {
+  <Input, Provides, PlanE, PlanR>(
+    plan: ExecutionPlan<{ provides: Provides; input: Input; error: PlanE; requirements: PlanR }>
+  ): <A, E extends Input, R>(effect: Effect<A, E, R>) => Effect<A, E | PlanE, Exclude<R, Provides> | PlanR>
+  <A, E extends Input, R, Provides, Input, PlanE, PlanR>(
+    effect: Effect<A, E, R>,
+    plan: ExecutionPlan<{ provides: Provides; input: Input; error: PlanE; requirements: PlanR }>
+  ): Effect<A, E | PlanE, Exclude<R, Provides> | PlanR>
+} = internalExecutionPlan.withExecutionPlan
 
 /**
  * Retries a failing effect and runs a fallback effect if retries are exhausted.
@@ -4970,13 +4998,15 @@ export const uninterruptibleMask: <A, E, R>(
  * @since 3.4.0
  */
 export const liftPredicate: {
-  <A, B extends A, E>(
-    refinement: Refinement<NoInfer<A>, B>,
-    orFailWith: (a: NoInfer<A>) => E
-  ): (a: A) => Effect<B, E>
-  <A, E>(predicate: Predicate<NoInfer<A>>, orFailWith: (a: NoInfer<A>) => E): (a: A) => Effect<A, E>
-  <A, E, B extends A>(self: A, refinement: Refinement<A, B>, orFailWith: (a: A) => E): Effect<B, E>
-  <A, E>(self: A, predicate: Predicate<NoInfer<A>>, orFailWith: (a: NoInfer<A>) => E): Effect<A, E>
+  <T extends A, E, B extends T = T, A = T>(
+    predicate: Refinement<T, B> | Predicate<T>,
+    orFailWith: (a: EqualsWith<T, B, A, Exclude<A, B>>) => E
+  ): (a: A) => Effect<EqualsWith<T, B, A, B>, E>
+  <A, E, B extends A = A>(
+    self: A,
+    predicate: Refinement<A, B> | Predicate<A>,
+    orFailWith: (a: EqualsWith<A, B, A, Exclude<A, B>>) => E
+  ): Effect<B, E>
 } = effect.liftPredicate
 
 /**
@@ -6264,7 +6294,7 @@ export const fork: <A, E, R>(self: Effect<A, E, R>) => Effect<Fiber.RuntimeFiber
  * useful for tasks that need to run in the background independently, such as
  * periodic logging, monitoring, or background data processing.
  *
- * **Example** (Creating a Daemon Fibe)
+ * **Example** (Creating a Daemon Fiber)
  *
  * ```ts
  * import { Effect, Console, Schedule } from "effect"
@@ -7511,7 +7541,7 @@ export const mapInputContext: {
  * @category Context
  */
 export const provide: {
-  <const Layers extends [Layer.Layer.Any, ...Array<Layer.Layer.Any>]>(
+  <const Layers extends readonly [Layer.Layer.Any, ...Array<Layer.Layer.Any>]>(
     layers: Layers
   ): <A, E, R>(
     self: Effect<A, E, R>
@@ -7529,7 +7559,7 @@ export const provide: {
   <E2, R2>(
     managedRuntime: ManagedRuntime.ManagedRuntime<R2, E2>
   ): <A, E, R>(self: Effect<A, E, R>) => Effect<A, E | E2, Exclude<R, R2>>
-  <A, E, R, const Layers extends [Layer.Layer.Any, ...Array<Layer.Layer.Any>]>(
+  <A, E, R, const Layers extends readonly [Layer.Layer.Any, ...Array<Layer.Layer.Any>]>(
     self: Effect<A, E, R>,
     layers: Layers
   ): Effect<
@@ -8315,7 +8345,7 @@ export {
 export const filterOrDie: {
   <A, B extends A>(
     refinement: Refinement<NoInfer<A>, B>,
-    orDieWith: (a: NoInfer<A>) => unknown
+    orDieWith: (a: EqualsWith<A, B, A, Exclude<A, B>>) => unknown
   ): <E, R>(self: Effect<A, E, R>) => Effect<B, E, R>
   <A>(
     predicate: Predicate<NoInfer<A>>,
@@ -8324,7 +8354,7 @@ export const filterOrDie: {
   <A, E, R, B extends A>(
     self: Effect<A, E, R>,
     refinement: Refinement<A, B>,
-    orDieWith: (a: A) => unknown
+    orDieWith: (a: EqualsWith<A, B, A, Exclude<A, B>>) => unknown
   ): Effect<B, E, R>
   <A, E, R>(self: Effect<A, E, R>, predicate: Predicate<A>, orDieWith: (a: A) => unknown): Effect<A, E, R>
 } = effect.filterOrDie
@@ -8365,24 +8395,24 @@ export const filterOrDieMessage: {
  * @category Filtering
  */
 export const filterOrElse: {
-  <A, B extends A, C, E2, R2>(
+  <A, C, E2, R2, B extends A>(
     refinement: Refinement<NoInfer<A>, B>,
-    orElse: (a: NoInfer<A>) => Effect<C, E2, R2>
+    orElse: (a: EqualsWith<A, B, NoInfer<A>, Exclude<NoInfer<A>, B>>) => Effect<C, E2, R2>
   ): <E, R>(self: Effect<A, E, R>) => Effect<B | C, E2 | E, R2 | R>
-  <A, B, E2, R2>(
+  <A, C, E2, R2>(
     predicate: Predicate<NoInfer<A>>,
-    orElse: (a: NoInfer<A>) => Effect<B, E2, R2>
-  ): <E, R>(self: Effect<A, E, R>) => Effect<A | B, E2 | E, R2 | R>
-  <A, E, R, B extends A, C, E2, R2>(
+    orElse: (a: NoInfer<A>) => Effect<C, E2, R2>
+  ): <E, R>(self: Effect<A, E, R>) => Effect<A | C, E2 | E, R2 | R>
+  <A, E, R, C, E2, R2, B extends A>(
     self: Effect<A, E, R>,
     refinement: Refinement<A, B>,
-    orElse: (a: A) => Effect<C, E2, R2>
+    orElse: (a: EqualsWith<A, B, A, Exclude<A, B>>) => Effect<C, E2, R2>
   ): Effect<B | C, E | E2, R | R2>
-  <A, E, R, B, E2, R2>(
+  <A, E, R, C, E2, R2>(
     self: Effect<A, E, R>,
     predicate: Predicate<A>,
-    orElse: (a: A) => Effect<B, E2, R2>
-  ): Effect<A | B, E | E2, R | R2>
+    orElse: (a: A) => Effect<C, E2, R2>
+  ): Effect<A | C, E | E2, R | R2>
 } = effect.filterOrElse
 
 /**
@@ -8436,28 +8466,28 @@ export const filterOrElse: {
  * @category Filtering
  */
 export const filterOrFail: {
-  <A, B extends A, E2>(
+  <A, E2, B extends A>(
     refinement: Refinement<NoInfer<A>, B>,
-    orFailWith: (a: NoInfer<A>) => E2
-  ): <E, R>(self: Effect<A, E, R>) => Effect<B, E2 | E, R>
+    orFailWith: (a: EqualsWith<A, B, NoInfer<A>, Exclude<NoInfer<A>, B>>) => E2
+  ): <E, R>(self: Effect<A, E, R>) => Effect<NoInfer<B>, E2 | E, R>
   <A, E2>(
     predicate: Predicate<NoInfer<A>>,
     orFailWith: (a: NoInfer<A>) => E2
   ): <E, R>(self: Effect<A, E, R>) => Effect<A, E2 | E, R>
-  <A, B extends A>(
-    refinement: Refinement<NoInfer<A>, B>
-  ): <E, R>(self: Effect<A, E, R>) => Effect<B, Cause.NoSuchElementException | E, R>
-  <A>(predicate: Predicate<NoInfer<A>>): <E, R>(self: Effect<A, E, R>) => Effect<A, Cause.NoSuchElementException | E, R>
-  <A, E, R, B extends A, E2>(
+  <A, E, R, E2, B extends A>(
     self: Effect<A, E, R>,
     refinement: Refinement<A, B>,
-    orFailWith: (a: A) => E2
-  ): Effect<B, E | E2, R>
-  <A, E, R, E2>(self: Effect<A, E, R>, predicate: Predicate<A>, orFailWith: (a: A) => E2): Effect<A, E | E2, R>
+    orFailWith: (a: EqualsWith<A, B, A, Exclude<A, B>>) => E2
+  ): Effect<NoInfer<B>, E2 | E, R>
+  <A, E, R, E2>(self: Effect<A, E, R>, predicate: Predicate<A>, orFailWith: (a: A) => E2): Effect<A, E2 | E, R>
+  <A, B extends A>(
+    refinement: Refinement<NoInfer<A>, B>
+  ): <E, R>(self: Effect<A, E, R>) => Effect<NoInfer<B>, Cause.NoSuchElementException | E, R>
+  <A>(predicate: Predicate<NoInfer<A>>): <E, R>(self: Effect<A, E, R>) => Effect<A, Cause.NoSuchElementException | E, R>
   <A, E, R, B extends A>(
     self: Effect<A, E, R>,
     refinement: Refinement<A, B>
-  ): Effect<B, E | Cause.NoSuchElementException, R>
+  ): Effect<NoInfer<B>, E | Cause.NoSuchElementException, R>
   <A, E, R>(self: Effect<A, E, R>, predicate: Predicate<A>): Effect<A, E | Cause.NoSuchElementException, R>
 } = effect.filterOrFail
 
@@ -10327,7 +10357,7 @@ export const scheduleForked: {
     self: Effect<A, E, R>,
     schedule: Schedule.Schedule<Out, unknown, R2>
   ): Effect<Fiber.RuntimeFiber<Out, E>, never, Scope.Scope | R | R2>
-} = circular.scheduleForked
+} = schedule_.scheduleForked
 
 /**
  * Runs an effect repeatedly according to a schedule, starting from a specified
@@ -11180,7 +11210,7 @@ export const withUnhandledErrorLogLevel: {
  * // timestamp=... level=DEBUG fiber=#0 message=message2
  * ```
  *
- * @see {@link FiberRef.minimumLogLevel} to retrieve the current minimum log level.
+ * @see {@link FiberRef.currentMinimumLogLevel} to retrieve the current minimum log level.
  *
  * @since 3.13.0
  * @category Logging
@@ -11543,6 +11573,33 @@ export const withRandom: {
 } = defaultServices.withRandom
 
 /**
+ * Executes the specified effect with a `Random` service that cycles through
+ * a provided array of values.
+ *
+ * @example
+ * ```ts
+ * import { Effect, Random } from "effect"
+ *
+ * Effect.gen(function*() {
+ *   console.log(yield* Random.next) // 0.2
+ *   console.log(yield* Random.next) // 0.5
+ *   console.log(yield* Random.next) // 0.8
+ * }).pipe(Effect.withRandomFixed([0.2, 0.5, 0.8]))
+ * ```
+ *
+ * @since 3.11.0
+ * @category Random
+ */
+export const withRandomFixed: {
+  <T extends RA.NonEmptyArray<any>>(values: T): <A, E, R>(effect: Effect<A, E, R>) => Effect<A, E, R>
+  <T extends RA.NonEmptyArray<any>, A, E, R>(effect: Effect<A, E, R>, values: T): Effect<A, E, R>
+} = dual(
+  2,
+  <T extends RA.NonEmptyArray<any>, A, E, R>(effect: Effect<A, E, R>, values: T): Effect<A, E, R> =>
+    withRandom(effect, Random.fixed(values))
+)
+
+/**
  * Sets the implementation of the `Random` service to the specified value and
  * restores it to its original value when the scope is closed.
  *
@@ -11713,6 +11770,11 @@ export interface Permit {
  * @since 2.0.0
  */
 export interface Semaphore {
+  /**
+   * Adjusts the number of permits available in the semaphore.
+   */
+  resize(permits: number): Effect<void>
+
   /**
    * Runs an effect with the given number of permits and releases the permits
    * when the effect completes.
@@ -12073,7 +12135,7 @@ export const runCallback: <A, E>(
  */
 export const runPromise: <A, E>(
   effect: Effect<A, E, never>,
-  options?: { readonly signal?: AbortSignal } | undefined
+  options?: { readonly signal?: AbortSignal | undefined } | undefined
 ) => Promise<A> = runtime_.unsafeRunPromiseEffect
 
 /**
@@ -13385,8 +13447,16 @@ const makeTagProxy = (TagClass: Context.Tag<any, any> & Record<PropertyKey, any>
           return s[prop]
         })
       const cn = core.andThen(target, (s: any) => s[prop])
+      // @effect-diagnostics-next-line floatingEffect:off
       Object.assign(fn, cn)
-      Object.setPrototypeOf(fn, Object.getPrototypeOf(cn))
+      const apply = fn.apply
+      const bind = fn.bind
+      const call = fn.call
+      const proto = Object.setPrototypeOf({}, Object.getPrototypeOf(cn))
+      proto.apply = apply
+      proto.bind = bind
+      proto.call = call
+      Object.setPrototypeOf(fn, proto)
       cache.set(prop, fn)
       return fn
     }
@@ -13511,14 +13581,18 @@ export const Service: <Self = never>() => [Self] extends [never] ? MissingSelfGe
     const Key extends string,
     const Make extends
       | {
-        readonly scoped: Effect<Service.AllowedType<Key, Make>, any, any>
+        readonly scoped:
+          | Effect<Service.AllowedType<Key, Make>, any, any>
+          | ((...args: any) => Effect<Service.AllowedType<Key, Make>, any, any>)
         readonly dependencies?: ReadonlyArray<Layer.Layer.Any>
         readonly accessors?: boolean
         /** @deprecated */
         readonly ಠ_ಠ: never
       }
       | {
-        readonly effect: Effect<Service.AllowedType<Key, Make>, any, any>
+        readonly effect:
+          | Effect<Service.AllowedType<Key, Make>, any, any>
+          | ((...args: any) => Effect<Service.AllowedType<Key, Make>, any, any>)
         readonly dependencies?: ReadonlyArray<Layer.Layer.Any>
         readonly accessors?: boolean
         /** @deprecated */
@@ -13545,7 +13619,9 @@ export const Service: <Self = never>() => [Self] extends [never] ? MissingSelfGe
   <
     const Key extends string,
     const Make extends NoExcessProperties<{
-      readonly scoped: Effect<Service.AllowedType<Key, Make>, any, any>
+      readonly scoped:
+        | Effect<Service.AllowedType<Key, Make>, any, any>
+        | ((...args: any) => Effect<Service.AllowedType<Key, Make>, any, any>)
       readonly dependencies?: ReadonlyArray<Layer.Layer.Any>
       readonly accessors?: boolean
     }, Make>
@@ -13556,7 +13632,9 @@ export const Service: <Self = never>() => [Self] extends [never] ? MissingSelfGe
   <
     const Key extends string,
     const Make extends NoExcessProperties<{
-      readonly effect: Effect<Service.AllowedType<Key, Make>, any, any>
+      readonly effect:
+        | Effect<Service.AllowedType<Key, Make>, any, any>
+        | ((...args: any) => Effect<Service.AllowedType<Key, Make>, any, any>)
       readonly dependencies?: ReadonlyArray<Layer.Layer.Any>
       readonly accessors?: boolean
     }, Make>
@@ -13639,15 +13717,28 @@ export const Service: <Self = never>() => [Self] extends [never] ? MissingSelfGe
     const hasDeps = "dependencies" in maker && maker.dependencies.length > 0
     const layerName = hasDeps ? "DefaultWithoutDependencies" : "Default"
     let layerCache: Layer.Layer.Any | undefined
+    let isFunction = false
     if ("effect" in maker) {
+      isFunction = typeof maker.effect === "function"
       Object.defineProperty(TagClass, layerName, {
         get(this: any) {
+          if (isFunction) {
+            return function(this: typeof TagClass) {
+              return layer.fromEffect(TagClass, map(maker.effect.apply(null, arguments), (_) => new this(_)))
+            }.bind(this)
+          }
           return layerCache ??= layer.fromEffect(TagClass, map(maker.effect, (_) => new this(_)))
         }
       })
     } else if ("scoped" in maker) {
+      isFunction = typeof maker.scoped === "function"
       Object.defineProperty(TagClass, layerName, {
         get(this: any) {
+          if (isFunction) {
+            return function(this: typeof TagClass) {
+              return layer.scoped(TagClass, map(maker.scoped.apply(null, arguments), (_) => new this(_)))
+            }.bind(this)
+          }
           return layerCache ??= layer.scoped(TagClass, map(maker.scoped, (_) => new this(_)))
         }
       })
@@ -13669,6 +13760,14 @@ export const Service: <Self = never>() => [Self] extends [never] ? MissingSelfGe
       let layerWithDepsCache: Layer.Layer.Any | undefined
       Object.defineProperty(TagClass, "Default", {
         get(this: any) {
+          if (isFunction) {
+            return function(this: typeof TagClass) {
+              return layer.provide(
+                this.DefaultWithoutDependencies.apply(null, arguments),
+                maker.dependencies
+              )
+            }
+          }
           return layerWithDepsCache ??= layer.provide(
             this.DefaultWithoutDependencies,
             maker.dependencies
@@ -13741,16 +13840,27 @@ export declare namespace Service {
     & { key: Key }
     & (MakeAccessors<Make> extends true ? Tag.Proxy<Self, MakeService<Make>> : {})
     & (MakeDeps<Make> extends never ? {
-        readonly Default: Layer.Layer<Self, MakeError<Make>, MakeContext<Make>>
+        readonly Default: HasArguments<Make> extends true ?
+          (...args: MakeArguments<Make>) => Layer.Layer<Self, MakeError<Make>, MakeContext<Make>>
+          : Layer.Layer<Self, MakeError<Make>, MakeContext<Make>>
       } :
       {
-        readonly DefaultWithoutDependencies: Layer.Layer<Self, MakeError<Make>, MakeContext<Make>>
-        readonly Default: Layer.Layer<
-          Self,
-          MakeError<Make> | MakeDepsE<Make>,
-          | Exclude<MakeContext<Make>, MakeDepsOut<Make>>
-          | MakeDepsIn<Make>
-        >
+        readonly DefaultWithoutDependencies: HasArguments<Make> extends true
+          ? (...args: MakeArguments<Make>) => Layer.Layer<Self, MakeError<Make>, MakeContext<Make>>
+          : Layer.Layer<Self, MakeError<Make>, MakeContext<Make>>
+
+        readonly Default: HasArguments<Make> extends true ? (...args: MakeArguments<Make>) => Layer.Layer<
+            Self,
+            MakeError<Make> | MakeDepsE<Make>,
+            | Exclude<MakeContext<Make>, MakeDepsOut<Make>>
+            | MakeDepsIn<Make>
+          > :
+          Layer.Layer<
+            Self,
+            MakeError<Make> | MakeDepsE<Make>,
+            | Exclude<MakeContext<Make>, MakeDepsOut<Make>>
+            | MakeDepsIn<Make>
+          >
       })
 
   /**
@@ -13758,6 +13868,8 @@ export declare namespace Service {
    */
   export type MakeService<Make> = Make extends { readonly effect: Effect<infer _A, infer _E, infer _R> } ? _A
     : Make extends { readonly scoped: Effect<infer _A, infer _E, infer _R> } ? _A
+    : Make extends { readonly effect: (...args: infer _Args) => Effect<infer _A, infer _E, infer _R> } ? _A
+    : Make extends { readonly scoped: (...args: infer _Args) => Effect<infer _A, infer _E, infer _R> } ? _A
     : Make extends { readonly sync: LazyArg<infer A> } ? A
     : Make extends { readonly succeed: infer A } ? A
     : never
@@ -13767,6 +13879,8 @@ export declare namespace Service {
    */
   export type MakeError<Make> = Make extends { readonly effect: Effect<infer _A, infer _E, infer _R> } ? _E
     : Make extends { readonly scoped: Effect<infer _A, infer _E, infer _R> } ? _E
+    : Make extends { readonly effect: (...args: infer _Args) => Effect<infer _A, infer _E, infer _R> } ? _E
+    : Make extends { readonly scoped: (...args: infer _Args) => Effect<infer _A, infer _E, infer _R> } ? _E
     : never
 
   /**
@@ -13774,6 +13888,9 @@ export declare namespace Service {
    */
   export type MakeContext<Make> = Make extends { readonly effect: Effect<infer _A, infer _E, infer _R> } ? _R
     : Make extends { readonly scoped: Effect<infer _A, infer _E, infer _R> } ? Exclude<_R, Scope.Scope>
+    : Make extends { readonly effect: (...args: infer _Args) => Effect<infer _A, infer _E, infer _R> } ? _R
+    : Make extends { readonly scoped: (...args: infer _Args) => Effect<infer _A, infer _E, infer _R> } ?
+      Exclude<_R, Scope.Scope>
     : never
 
   /**
@@ -13803,6 +13920,25 @@ export declare namespace Service {
    */
   export type MakeAccessors<Make> = Make extends { readonly accessors: true } ? true
     : false
+
+  /**
+   * @since 3.16.0
+   */
+  export type MakeArguments<Make> = Make extends
+    { readonly effect: (...args: infer Args) => Effect<infer _A, infer _E, infer _R> } ? Args
+    : Make extends { readonly scoped: (...args: infer Args) => Effect<infer _A, infer _E, infer _R> } ? Args
+    : never
+
+  /**
+   * @since 3.16.0
+   */
+  export type HasArguments<Make> = Make extends {
+    readonly scoped: (...args: ReadonlyArray<any>) => Effect<infer _A, infer _E, infer _R>
+  } ? true :
+    Make extends {
+      readonly effect: (...args: ReadonlyArray<any>) => Effect<infer _A, infer _E, infer _R>
+    } ? true :
+    false
 }
 
 /**
@@ -13810,6 +13946,11 @@ export declare namespace Service {
  * @category Models
  */
 export namespace fn {
+  /**
+   * @since 3.19.0
+   * @category Models
+   */
+  export type Return<A, E = never, R = never> = Generator<YieldWrap<Effect<any, E, R>>, A, any>
   /**
    * @since 3.11.0
    * @category Models
@@ -13822,7 +13963,12 @@ export namespace fn {
       [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
       [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
     >
-    <Eff extends YieldWrap<Effect<any, any, any>>, AEff, Args extends Array<any>, A extends Effect<any, any, any>>(
+    <
+      Eff extends YieldWrap<Effect<any, any, any>>,
+      AEff,
+      Args extends Array<any>,
+      A extends Effect<any, any, any>
+    >(
       body: (...args: Args) => Generator<Eff, AEff, never>,
       a: (
         _: Effect<
@@ -13830,10 +13976,16 @@ export namespace fn {
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
         >,
-        ...args: Args
+        ...args: NoInfer<Args>
       ) => A
-    ): (...args: Args) => A
-    <Eff extends YieldWrap<Effect<any, any, any>>, AEff, Args extends Array<any>, A, B extends Effect<any, any, any>>(
+    ): (...args: Args) => Effect.AsEffect<A>
+    <
+      Eff extends YieldWrap<Effect<any, any, any>>,
+      AEff,
+      Args extends Array<any>,
+      A,
+      B extends Effect<any, any, any>
+    >(
       body: (...args: Args) => Generator<Eff, AEff, never>,
       a: (
         _: Effect<
@@ -13841,10 +13993,10 @@ export namespace fn {
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
         >,
-        ...args: Args
+        ...args: NoInfer<Args>
       ) => A,
-      b: (_: A, ...args: Args) => B
-    ): (...args: Args) => B
+      b: (_: A, ...args: NoInfer<Args>) => B
+    ): (...args: Args) => Effect.AsEffect<B>
     <
       Eff extends YieldWrap<Effect<any, any, any>>,
       AEff,
@@ -13860,11 +14012,11 @@ export namespace fn {
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
         >,
-        ...args: Args
+        ...args: NoInfer<Args>
       ) => A,
-      b: (_: A, ...args: Args) => B,
-      c: (_: B, ...args: Args) => C
-    ): (...args: Args) => C
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C
+    ): (...args: Args) => Effect.AsEffect<C>
     <
       Eff extends YieldWrap<Effect<any, any, any>>,
       AEff,
@@ -13881,12 +14033,12 @@ export namespace fn {
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
         >,
-        ...args: Args
+        ...args: NoInfer<Args>
       ) => A,
-      b: (_: A, ...args: Args) => B,
-      c: (_: B, ...args: Args) => C,
-      d: (_: C, ...args: Args) => D
-    ): (...args: Args) => D
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D
+    ): (...args: Args) => Effect.AsEffect<D>
     <
       Eff extends YieldWrap<Effect<any, any, any>>,
       AEff,
@@ -13904,13 +14056,13 @@ export namespace fn {
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
         >,
-        ...args: Args
+        ...args: NoInfer<Args>
       ) => A,
-      b: (_: A, ...args: Args) => B,
-      c: (_: B, ...args: Args) => C,
-      d: (_: C, ...args: Args) => D,
-      e: (_: D, ...args: Args) => E
-    ): (...args: Args) => E
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E
+    ): (...args: Args) => Effect.AsEffect<E>
     <
       Eff extends YieldWrap<Effect<any, any, any>>,
       AEff,
@@ -13929,14 +14081,14 @@ export namespace fn {
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
         >,
-        ...args: Args
+        ...args: NoInfer<Args>
       ) => A,
-      b: (_: A, ...args: Args) => B,
-      c: (_: B, ...args: Args) => C,
-      d: (_: C, ...args: Args) => D,
-      e: (_: D, ...args: Args) => E,
-      f: (_: E, ...args: Args) => F
-    ): (...args: Args) => F
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E,
+      f: (_: E, ...args: NoInfer<Args>) => F
+    ): (...args: Args) => Effect.AsEffect<F>
     <
       Eff extends YieldWrap<Effect<any, any, any>>,
       AEff,
@@ -13956,15 +14108,15 @@ export namespace fn {
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
         >,
-        ...args: Args
+        ...args: NoInfer<Args>
       ) => A,
-      b: (_: A, ...args: Args) => B,
-      c: (_: B, ...args: Args) => C,
-      d: (_: C, ...args: Args) => D,
-      e: (_: D, ...args: Args) => E,
-      f: (_: E, ...args: Args) => F,
-      g: (_: F, ...args: Args) => G
-    ): (...args: Args) => G
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E,
+      f: (_: E, ...args: NoInfer<Args>) => F,
+      g: (_: F, ...args: NoInfer<Args>) => G
+    ): (...args: Args) => Effect.AsEffect<G>
     <
       Eff extends YieldWrap<Effect<any, any, any>>,
       AEff,
@@ -13985,16 +14137,16 @@ export namespace fn {
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
         >,
-        ...args: Args
+        ...args: NoInfer<Args>
       ) => A,
-      b: (_: A, ...args: Args) => B,
-      c: (_: B, ...args: Args) => C,
-      d: (_: C, ...args: Args) => D,
-      e: (_: D, ...args: Args) => E,
-      f: (_: E, ...args: Args) => F,
-      g: (_: F, ...args: Args) => G,
-      h: (_: G, ...args: Args) => H
-    ): (...args: Args) => H
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E,
+      f: (_: E, ...args: NoInfer<Args>) => F,
+      g: (_: F, ...args: NoInfer<Args>) => G,
+      h: (_: G, ...args: NoInfer<Args>) => H
+    ): (...args: Args) => Effect.AsEffect<H>
     <
       Eff extends YieldWrap<Effect<any, any, any>>,
       AEff,
@@ -14016,17 +14168,17 @@ export namespace fn {
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
           [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
         >,
-        ...args: Args
+        ...args: NoInfer<Args>
       ) => A,
-      b: (_: A, ...args: Args) => B,
-      c: (_: B, ...args: Args) => C,
-      d: (_: C, ...args: Args) => D,
-      e: (_: D, ...args: Args) => E,
-      f: (_: E, ...args: Args) => F,
-      g: (_: F, ...args: Args) => G,
-      h: (_: G, ...args: Args) => H,
-      i: (_: H, ...args: Args) => I
-    ): (...args: Args) => I
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E,
+      f: (_: E, ...args: NoInfer<Args>) => F,
+      g: (_: F, ...args: NoInfer<Args>) => G,
+      h: (_: G, ...args: NoInfer<Args>) => H,
+      i: (_: H, ...args: NoInfer<Args>) => I
+    ): (...args: Args) => Effect.AsEffect<I>
   }
 
   /**
@@ -14036,79 +14188,298 @@ export namespace fn {
   export type NonGen = {
     <Eff extends Effect<any, any, any>, Args extends Array<any>>(
       body: (...args: Args) => Eff
-    ): (...args: Args) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
     <Eff extends Effect<any, any, any>, A, Args extends Array<any>>(
       body: (...args: Args) => A,
-      a: (_: A, ...args: Args) => Eff
-    ): (...args: Args) => Eff
+      a: (_: A, ...args: NoInfer<Args>) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
     <Eff extends Effect<any, any, any>, A, B, Args extends Array<any>>(
       body: (...args: Args) => A,
-      a: (_: A, ...args: Args) => B,
-      b: (_: B, ...args: Args) => Eff
-    ): (...args: Args) => Eff
+      a: (_: A, ...args: NoInfer<Args>) => B,
+      b: (_: B, ...args: NoInfer<Args>) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
     <Eff extends Effect<any, any, any>, A, B, C, Args extends Array<any>>(
       body: (...args: Args) => A,
-      a: (_: A, ...args: Args) => B,
-      b: (_: B, ...args: Args) => C,
-      c: (_: C, ...args: Args) => Eff
-    ): (...args: Args) => Eff
+      a: (_: A, ...args: NoInfer<Args>) => B,
+      b: (_: B, ...args: NoInfer<Args>) => C,
+      c: (_: C, ...args: NoInfer<Args>) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
     <Eff extends Effect<any, any, any>, A, B, C, D, Args extends Array<any>>(
       body: (...args: Args) => A,
-      a: (_: A, ...args: Args) => B,
-      b: (_: B, ...args: Args) => C,
-      c: (_: C, ...args: Args) => D,
-      d: (_: D, ...args: Args) => Eff
-    ): (...args: Args) => Eff
+      a: (_: A, ...args: NoInfer<Args>) => B,
+      b: (_: B, ...args: NoInfer<Args>) => C,
+      c: (_: C, ...args: NoInfer<Args>) => D,
+      d: (_: D, ...args: NoInfer<Args>) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
     <Eff extends Effect<any, any, any>, A, B, C, D, E, Args extends Array<any>>(
       body: (...args: Args) => A,
-      a: (_: A, ...args: Args) => B,
-      b: (_: B, ...args: Args) => C,
-      c: (_: C, ...args: Args) => D,
-      d: (_: D, ...args: Args) => E,
-      e: (_: E, ...args: Args) => Eff
-    ): (...args: Args) => Eff
+      a: (_: A, ...args: NoInfer<Args>) => B,
+      b: (_: B, ...args: NoInfer<Args>) => C,
+      c: (_: C, ...args: NoInfer<Args>) => D,
+      d: (_: D, ...args: NoInfer<Args>) => E,
+      e: (_: E, ...args: NoInfer<Args>) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
     <Eff extends Effect<any, any, any>, A, B, C, D, E, F, Args extends Array<any>>(
       body: (...args: Args) => A,
-      a: (_: A, ...args: Args) => B,
-      b: (_: B, ...args: Args) => C,
-      c: (_: C, ...args: Args) => D,
-      d: (_: D, ...args: Args) => E,
-      e: (_: E, ...args: Args) => F,
-      f: (_: F, ...args: Args) => Eff
-    ): (...args: Args) => Eff
+      a: (_: A, ...args: NoInfer<Args>) => B,
+      b: (_: B, ...args: NoInfer<Args>) => C,
+      c: (_: C, ...args: NoInfer<Args>) => D,
+      d: (_: D, ...args: NoInfer<Args>) => E,
+      e: (_: E, ...args: NoInfer<Args>) => F,
+      f: (_: F, ...args: NoInfer<Args>) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
     <Eff extends Effect<any, any, any>, A, B, C, D, E, F, G, Args extends Array<any>>(
       body: (...args: Args) => A,
-      a: (_: A, ...args: Args) => B,
-      b: (_: B, ...args: Args) => C,
-      c: (_: C, ...args: Args) => D,
-      d: (_: D, ...args: Args) => E,
-      e: (_: E, ...args: Args) => F,
-      f: (_: F, ...args: Args) => G,
-      g: (_: G, ...args: Args) => Eff
-    ): (...args: Args) => Eff
+      a: (_: A, ...args: NoInfer<Args>) => B,
+      b: (_: B, ...args: NoInfer<Args>) => C,
+      c: (_: C, ...args: NoInfer<Args>) => D,
+      d: (_: D, ...args: NoInfer<Args>) => E,
+      e: (_: E, ...args: NoInfer<Args>) => F,
+      f: (_: F, ...args: NoInfer<Args>) => G,
+      g: (_: G, ...args: NoInfer<Args>) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
     <Eff extends Effect<any, any, any>, A, B, C, D, E, F, G, H, Args extends Array<any>>(
       body: (...args: Args) => A,
-      a: (_: A, ...args: Args) => B,
-      b: (_: B, ...args: Args) => C,
-      c: (_: C, ...args: Args) => D,
-      d: (_: D, ...args: Args) => E,
-      e: (_: E, ...args: Args) => F,
-      f: (_: F, ...args: Args) => G,
-      g: (_: G, ...args: Args) => H,
-      h: (_: H, ...args: Args) => Eff
-    ): (...args: Args) => Eff
+      a: (_: A, ...args: NoInfer<Args>) => B,
+      b: (_: B, ...args: NoInfer<Args>) => C,
+      c: (_: C, ...args: NoInfer<Args>) => D,
+      d: (_: D, ...args: NoInfer<Args>) => E,
+      e: (_: E, ...args: NoInfer<Args>) => F,
+      f: (_: F, ...args: NoInfer<Args>) => G,
+      g: (_: G, ...args: NoInfer<Args>) => H,
+      h: (_: H, ...args: NoInfer<Args>) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
     <Eff extends Effect<any, any, any>, A, B, C, D, E, F, G, H, I, Args extends Array<any>>(
       body: (...args: Args) => A,
-      a: (_: A, ...args: Args) => B,
-      b: (_: B, ...args: Args) => C,
-      c: (_: C, ...args: Args) => D,
-      d: (_: D, ...args: Args) => E,
-      e: (_: E, ...args: Args) => F,
-      f: (_: F, ...args: Args) => G,
-      g: (_: G, ...args: Args) => H,
-      h: (_: H, ...args: Args) => I,
-      i: (_: H, ...args: Args) => Eff
-    ): (...args: Args) => Eff
+      a: (_: A, ...args: NoInfer<Args>) => B,
+      b: (_: B, ...args: NoInfer<Args>) => C,
+      c: (_: C, ...args: NoInfer<Args>) => D,
+      d: (_: D, ...args: NoInfer<Args>) => E,
+      e: (_: E, ...args: NoInfer<Args>) => F,
+      f: (_: F, ...args: NoInfer<Args>) => G,
+      g: (_: G, ...args: NoInfer<Args>) => H,
+      h: (_: H, ...args: NoInfer<Args>) => I,
+      i: (_: H, ...args: NoInfer<Args>) => Eff
+    ): (...args: Args) => Effect.AsEffect<Eff>
+  }
+
+  /**
+   * @since 3.11.0
+   * @category Models
+   */
+  export type Untraced = {
+    <Eff extends YieldWrap<Effect<any, any, any>>, AEff, Args extends Array<any>>(
+      body: (...args: Args) => Generator<Eff, AEff, never>
+    ): (...args: Args) => Effect<
+      AEff,
+      [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+      [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+    >
+    <Eff extends YieldWrap<Effect<any, any, any>>, AEff, Args extends Array<any>, A>(
+      body: (...args: Args) => Generator<Eff, AEff, never>,
+      a: (
+        _: Effect<
+          AEff,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+        >,
+        ...args: NoInfer<Args>
+      ) => A
+    ): (...args: Args) => A
+    <Eff extends YieldWrap<Effect<any, any, any>>, AEff, Args extends Array<any>, A, B>(
+      body: (...args: Args) => Generator<Eff, AEff, never>,
+      a: (
+        _: Effect<
+          AEff,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+        >,
+        ...args: NoInfer<Args>
+      ) => A,
+      b: (_: A, ...args: NoInfer<Args>) => B
+    ): (...args: Args) => B
+    <
+      Eff extends YieldWrap<Effect<any, any, any>>,
+      AEff,
+      Args extends Array<any>,
+      A,
+      B,
+      C
+    >(
+      body: (...args: Args) => Generator<Eff, AEff, never>,
+      a: (
+        _: Effect<
+          AEff,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+        >,
+        ...args: NoInfer<Args>
+      ) => A,
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C
+    ): (...args: Args) => C
+    <
+      Eff extends YieldWrap<Effect<any, any, any>>,
+      AEff,
+      Args extends Array<any>,
+      A,
+      B,
+      C,
+      D
+    >(
+      body: (...args: Args) => Generator<Eff, AEff, never>,
+      a: (
+        _: Effect<
+          AEff,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+        >,
+        ...args: NoInfer<Args>
+      ) => A,
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D
+    ): (...args: Args) => D
+    <
+      Eff extends YieldWrap<Effect<any, any, any>>,
+      AEff,
+      Args extends Array<any>,
+      A,
+      B,
+      C,
+      D,
+      E
+    >(
+      body: (...args: Args) => Generator<Eff, AEff, never>,
+      a: (
+        _: Effect<
+          AEff,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+        >,
+        ...args: NoInfer<Args>
+      ) => A,
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E
+    ): (...args: Args) => E
+    <
+      Eff extends YieldWrap<Effect<any, any, any>>,
+      AEff,
+      Args extends Array<any>,
+      A,
+      B,
+      C,
+      D,
+      E,
+      F
+    >(
+      body: (...args: Args) => Generator<Eff, AEff, never>,
+      a: (
+        _: Effect<
+          AEff,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+        >,
+        ...args: NoInfer<Args>
+      ) => A,
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E,
+      f: (_: E, ...args: NoInfer<Args>) => F
+    ): (...args: Args) => F
+    <
+      Eff extends YieldWrap<Effect<any, any, any>>,
+      AEff,
+      Args extends Array<any>,
+      A,
+      B,
+      C,
+      D,
+      E,
+      F,
+      G
+    >(
+      body: (...args: Args) => Generator<Eff, AEff, never>,
+      a: (
+        _: Effect<
+          AEff,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+        >,
+        ...args: NoInfer<Args>
+      ) => A,
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E,
+      f: (_: E, ...args: NoInfer<Args>) => F,
+      g: (_: F, ...args: NoInfer<Args>) => G
+    ): (...args: Args) => G
+    <
+      Eff extends YieldWrap<Effect<any, any, any>>,
+      AEff,
+      Args extends Array<any>,
+      A,
+      B,
+      C,
+      D,
+      E,
+      F,
+      G,
+      H
+    >(
+      body: (...args: Args) => Generator<Eff, AEff, never>,
+      a: (
+        _: Effect<
+          AEff,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+        >,
+        ...args: NoInfer<Args>
+      ) => A,
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E,
+      f: (_: E, ...args: NoInfer<Args>) => F,
+      g: (_: F, ...args: NoInfer<Args>) => G,
+      h: (_: G, ...args: NoInfer<Args>) => H
+    ): (...args: Args) => H
+    <
+      Eff extends YieldWrap<Effect<any, any, any>>,
+      AEff,
+      Args extends Array<any>,
+      A,
+      B,
+      C,
+      D,
+      E,
+      F,
+      G,
+      H,
+      I
+    >(
+      body: (...args: Args) => Generator<Eff, AEff, never>,
+      a: (
+        _: Effect<
+          AEff,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>] ? E : never,
+          [Eff] extends [never] ? never : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>] ? R : never
+        >,
+        ...args: NoInfer<Args>
+      ) => A,
+      b: (_: A, ...args: NoInfer<Args>) => B,
+      c: (_: B, ...args: NoInfer<Args>) => C,
+      d: (_: C, ...args: NoInfer<Args>) => D,
+      e: (_: D, ...args: NoInfer<Args>) => E,
+      f: (_: E, ...args: NoInfer<Args>) => F,
+      g: (_: F, ...args: NoInfer<Args>) => G,
+      h: (_: G, ...args: NoInfer<Args>) => H,
+      i: (_: H, ...args: NoInfer<Args>) => I
+    ): (...args: Args) => I
   }
 }
 
@@ -14284,22 +14655,27 @@ export const fn:
     const name = nameOrBody
     const options = pipeables[0]
     return (body: Function, ...pipeables: Array<any>) =>
-      defineLength(body.length, function(this: any, ...args: Array<any>) {
-        const limit = Error.stackTraceLimit
-        Error.stackTraceLimit = 2
-        const errorCall = new Error()
-        Error.stackTraceLimit = limit
-        return fnApply({
-          self: this,
-          body,
-          args,
-          pipeables,
-          spanName: name,
-          spanOptions: options,
-          errorDef,
-          errorCall
-        })
-      })
+      defineLength(
+        body.length,
+        ({
+          [name](this: any, ...args: Array<any>) {
+            const limit = Error.stackTraceLimit
+            Error.stackTraceLimit = 2
+            const errorCall = new Error()
+            Error.stackTraceLimit = limit
+            return fnApply({
+              self: this,
+              body,
+              args,
+              pipeables,
+              spanName: name,
+              spanOptions: options,
+              errorDef,
+              errorCall
+            })
+          }
+        })[name]
+      )
   }
 
 function defineLength<F extends Function>(length: number, fn: F) {
@@ -14354,7 +14730,15 @@ function fnApply(options: {
     if (options.errorCall.stack) {
       const stackDef = options.errorDef.stack!.trim().split("\n")
       const stackCall = options.errorCall.stack.trim().split("\n")
-      cache = `${stackDef.slice(2).join("\n").trim()}\n${stackCall.slice(2).join("\n").trim()}`
+      let endStackDef = stackDef.slice(2).join("\n").trim()
+      if (!endStackDef.includes(`(`)) {
+        endStackDef = endStackDef.replace(/at (.*)/, "at ($1)")
+      }
+      let endStackCall = stackCall.slice(2).join("\n").trim()
+      if (!endStackCall.includes(`(`)) {
+        endStackCall = endStackCall.replace(/at (.*)/, "at ($1)")
+      }
+      cache = `${endStackDef}\n${endStackCall}`
       return cache
     }
   }
@@ -14372,4 +14756,54 @@ function fnApply(options: {
  * @since 3.12.0
  * @category Tracing
  */
-export const fnUntraced: fn.Gen = core.fnUntraced
+export const fnUntraced: fn.Untraced = core.fnUntraced
+
+// -----------------------------------------------------------------------------
+// Type constraints
+// -----------------------------------------------------------------------------
+
+/**
+ * A no-op type constraint that enforces the success channel of an Effect conforms to
+ * the specified success type `A`.
+ *
+ * @example
+ * import { Effect } from "effect"
+ *
+ * // Ensure that the program does not expose any unhandled errors.
+ * const program = Effect.succeed(42).pipe(Effect.ensureSuccessType<number>())
+ *
+ * @since 3.17.0
+ * @category Type constraints
+ */
+export const ensureSuccessType = <A>() => <A2 extends A, E, R>(effect: Effect<A2, E, R>): Effect<A2, E, R> => effect
+
+/**
+ * A no-op type constraint that enforces the error channel of an Effect conforms to
+ * the specified error type `E`.
+ *
+ * @example
+ * import { Effect } from "effect"
+ *
+ * // Ensure that the program does not expose any unhandled errors.
+ * const program = Effect.succeed(42).pipe(Effect.ensureErrorType<never>())
+ *
+ * @since 3.17.0
+ * @category Type constraints
+ */
+export const ensureErrorType = <E>() => <A, E2 extends E, R>(effect: Effect<A, E2, R>): Effect<A, E2, R> => effect
+
+/**
+ * A no-op type constraint that enforces the requirements channel of an Effect conforms to
+ * the specified requirements type `R`.
+ *
+ * @example
+ * import { Effect } from "effect"
+ *
+ * // Ensure that the program does not have any requirements.
+ * const program = Effect.succeed(42).pipe(Effect.ensureRequirementsType<never>())
+ *
+ * @since 3.17.0
+ * @category Type constraints
+ */
+export const ensureRequirementsType = <R>() => <A, E, R2 extends R>(effect: Effect<A, E, R2>): Effect<A, E, R2> =>
+  effect

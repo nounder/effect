@@ -288,6 +288,12 @@ export const removeHash: (self: HttpClientRequest) => HttpClientRequest = intern
  * @since 1.0.0
  * @category combinators
  */
+export const toUrl: (self: HttpClientRequest) => Option.Option<URL> = internal.toUrl
+
+/**
+ * @since 1.0.0
+ * @category combinators
+ */
 export const setBody: {
   (body: Body.HttpBody): (self: HttpClientRequest) => HttpClientRequest
   (self: HttpClientRequest, body: Body.HttpBody): HttpClientRequest
@@ -358,6 +364,15 @@ export const bodyFormData: {
   (body: FormData): (self: HttpClientRequest) => HttpClientRequest
   (self: HttpClientRequest, body: FormData): HttpClientRequest
 } = internal.bodyFormData
+
+/**
+ * @since 1.0.0
+ * @category combinators
+ */
+export const bodyFormDataRecord: {
+  (entries: Body.FormDataInput): (self: HttpClientRequest) => HttpClientRequest
+  (self: HttpClientRequest, entries: Body.FormDataInput): HttpClientRequest
+} = internal.bodyFormDataRecord
 
 /**
  * @since 1.0.0

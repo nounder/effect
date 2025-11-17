@@ -1,7 +1,15 @@
 import { describe, it } from "@effect/vitest"
+import {
+  assertFalse,
+  assertNone,
+  assertSome,
+  assertTrue,
+  deepStrictEqual,
+  strictEqual,
+  throws
+} from "@effect/vitest/utils"
 import { Array, Chunk, Duration, Either, List, Option } from "effect"
 import { equals, symbol } from "effect/Equal"
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual, throws } from "effect/test/util"
 
 const testStructuralSharing = <A>(a: List.List<A>, b: List.List<A>, n = 0): number | undefined => {
   if (a === b) {
@@ -221,7 +229,7 @@ describe("List", () => {
     if (typeof window !== "undefined") {
       return
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { inspect } = require("node:util")
     deepStrictEqual(inspect(List.empty()), inspect({ _id: "List", _tag: "Nil" }))
     deepStrictEqual(inspect(List.make(0, 1, 2)), inspect({ _id: "List", _tag: "Cons", values: [0, 1, 2] }))

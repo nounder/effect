@@ -9,7 +9,7 @@ import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as TestServices from "effect/TestServices"
 import * as V from "vitest"
-import * as internal from "./internal.js"
+import * as internal from "./internal/internal.js"
 
 /**
  * @since 1.0.0
@@ -19,7 +19,43 @@ export * from "vitest"
 /**
  * @since 1.0.0
  */
-export type API = V.TestAPI<{}>
+export type API =
+  & { scopedFixtures: V.TestAPI<{}>["scoped"] }
+  & { [K in keyof V.TestAPI<{}>]: K extends "scoped" ? unknown : V.TestAPI<{}>[K] }
+  & TestCollectorCallable
+
+interface TestCollectorCallable<C = object> {
+  /**
+   * @deprecated Use options as the second argument instead
+   */
+  <ExtraContext extends C>(
+    name: string | Function,
+    fn: V.TestFunction<ExtraContext>,
+    options: TestCollectorOptions
+  ): void
+  <ExtraContext extends C>(
+    name: string | Function,
+    fn?: V.TestFunction<ExtraContext>,
+    options?: number | TestCollectorOptions
+  ): void
+  <ExtraContext extends C>(
+    name: string | Function,
+    options?: TestCollectorOptions,
+    fn?: V.TestFunction<ExtraContext>
+  ): void
+}
+
+type TestCollectorOptions = {
+  concurrent?: boolean
+  sequential?: boolean
+  only?: boolean
+  skip?: boolean
+  todo?: boolean
+  fails?: boolean
+  timeout?: number
+  retry?: number
+  repeats?: number
+}
 
 /**
  * @since 1.0.0
@@ -91,18 +127,23 @@ export namespace Vitest {
   /**
    * @since 1.0.0
    */
-  export interface MethodsNonLive<R = never> extends API {
-    readonly effect: Vitest.Tester<TestServices.TestServices | R>
+  export interface MethodsNonLive<R = never, ExcludeTestServices extends boolean = false> extends API {
+    readonly effect: Vitest.Tester<(ExcludeTestServices extends true ? never : TestServices.TestServices) | R>
     readonly flakyTest: <A, E, R2>(
       self: Effect.Effect<A, E, R2>,
       timeout?: Duration.DurationInput
     ) => Effect.Effect<A, never, R2>
-    readonly scoped: Vitest.Tester<TestServices.TestServices | Scope.Scope | R>
+    readonly scoped: Vitest.Tester<
+      (ExcludeTestServices extends true ? never : TestServices.TestServices) | Scope.Scope | R
+    >
     readonly layer: <R2, E>(layer: Layer.Layer<R2, E, R>, options?: {
       readonly timeout?: Duration.DurationInput
     }) => {
-      (f: (it: Vitest.MethodsNonLive<R | R2>) => void): void
-      (name: string, f: (it: Vitest.MethodsNonLive<R | R2>) => void): void
+      (f: (it: Vitest.MethodsNonLive<R | R2, ExcludeTestServices>) => void): void
+      (
+        name: string,
+        f: (it: Vitest.MethodsNonLive<R | R2, ExcludeTestServices>) => void
+      ): void
     }
 
     /**
@@ -201,12 +242,16 @@ export const scopedLive: Vitest.Tester<Scope.Scope> = internal.scopedLive
  * })
  * ```
  */
-export const layer: <R, E>(
+export const layer: <R, E, const ExcludeTestServices extends boolean = false>(
   layer_: Layer.Layer<R, E>,
-  options?: { readonly memoMap?: Layer.MemoMap; readonly timeout?: Duration.DurationInput }
+  options?: {
+    readonly memoMap?: Layer.MemoMap
+    readonly timeout?: Duration.DurationInput
+    readonly excludeTestServices?: ExcludeTestServices
+  }
 ) => {
-  (f: (it: Vitest.MethodsNonLive<R>) => void): void
-  (name: string, f: (it: Vitest.MethodsNonLive<R>) => void): void
+  (f: (it: Vitest.MethodsNonLive<R, ExcludeTestServices>) => void): void
+  (name: string, f: (it: Vitest.MethodsNonLive<R, ExcludeTestServices>) => void): void
 } = internal.layer
 
 /**
@@ -232,12 +277,15 @@ const methods = { effect, live, flakyTest, scoped, scopedLive, layer, prop } as 
 /**
  * @since 1.0.0
  */
-export const it: Vitest.Methods = Object.assign(V.it, methods)
+export const it: Vitest.Methods = Object.assign(V.it, {
+  ...methods,
+  scopedFixtures: V.it.scoped.bind(V.it)
+})
 
 /**
  * @since 1.0.0
  */
-export const makeMethods: (it: V.TestAPI) => Vitest.Methods = internal.makeMethods
+export const makeMethods: (it: API) => Vitest.Methods = internal.makeMethods
 
 /**
  * @since 1.0.0

@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Chunk, MutableRef } from "effect"
-import { deepStrictEqual, strictEqual } from "effect/test/util"
 
 describe("MutableRef", () => {
   it("toString", () => {
@@ -31,7 +31,7 @@ describe("MutableRef", () => {
     if (typeof window !== "undefined") {
       return
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { inspect } = require("node:util")
     deepStrictEqual(
       inspect(MutableRef.make(Chunk.make(1, 2, 3))),

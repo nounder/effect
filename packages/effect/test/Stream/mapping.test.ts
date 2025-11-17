@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertLeft, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import * as Cause from "effect/Cause"
 import * as Chunk from "effect/Chunk"
 import * as Deferred from "effect/Deferred"
@@ -11,7 +12,6 @@ import { identity, pipe } from "effect/Function"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
-import { assertFalse, assertLeft, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 import * as TestClock from "effect/TestClock"
 
 describe("Stream", () => {
@@ -210,7 +210,7 @@ describe("Stream", () => {
       const queue = yield* (Queue.unbounded<number>())
       yield* pipe(
         Stream.range(0, 8),
-        Stream.mapEffect((n) => pipe(Queue.offer(queue, n)), { concurrency: 1 }),
+        Stream.mapEffect((n) => Queue.offer(queue, n), { concurrency: 1 }),
         Stream.runDrain
       )
       const result = yield* (Queue.takeAll(queue))

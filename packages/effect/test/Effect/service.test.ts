@@ -1,11 +1,11 @@
 import { describe, it } from "@effect/vitest"
+import { assertInstanceOf, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Cause } from "effect"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import { pipe } from "effect/Function"
+import { flow, pipe } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Scope from "effect/Scope"
-import { assertInstanceOf, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 class Prefix extends Effect.Service<Prefix>()("Prefix", {
   sync: () => ({
@@ -181,7 +181,7 @@ describe("Effect.Service", () => {
         accessors: true
       }) {}
 
-      const withUse = yield* Service.foo().pipe(Effect.flip, Effect.provide(Service.Default))
+      const withUse = yield* Service.use((_) => _.foo()).pipe(Effect.flip, Effect.provide(Service.Default))
       deepStrictEqual(
         withUse,
         new Cause.UnknownException(new Error("foo"), "An unknown error occurred in Effect.andThen")
@@ -195,5 +195,52 @@ describe("Effect.Service", () => {
 
       const accessorSuccess = yield* Service.bar().pipe(Effect.provide(Service.Default))
       strictEqual(accessorSuccess, "bar")
+    }))
+
+  it.effect("scoped with arguments", () =>
+    Effect.gen(function*() {
+      class Service extends Effect.Service<Service>()("Service", {
+        accessors: true,
+        scoped: Effect.fnUntraced(function*(x: number) {
+          return { x }
+        })
+      }) {}
+
+      const x = yield* Service.x.pipe(Effect.provide(Service.Default(42)))
+      strictEqual(x, 42)
+      const x2 = yield* Service.x.pipe(Effect.provide(Service.Default(43)))
+      strictEqual(x2, 43)
+    }))
+
+  it.effect("scoped with arguments & deps", () =>
+    Effect.gen(function*() {
+      class Service extends Effect.Service<Service>()("Service", {
+        accessors: true,
+        dependencies: [Prefix.Default],
+        scoped: Effect.fnUntraced(function*(x: number) {
+          return { x }
+        })
+      }) {}
+
+      const x = yield* Service.x.pipe(Effect.provide(Service.Default(42)))
+      strictEqual(x, 42)
+      const x2 = yield* Service.x.pipe(Effect.provide(Service.DefaultWithoutDependencies(42)))
+      strictEqual(x2, 42)
+      const x3 = yield* Service.x.pipe(Effect.provide(Service.Default(43)))
+      strictEqual(x3, 43)
+    }))
+
+  it.effect("works with flow", () =>
+    Effect.gen(function*() {
+      class Inc extends Effect.Service<Inc>()("Inc", {
+        accessors: true,
+        effect: Effect.gen(function*() {
+          return { inc: (x: number) => Effect.succeed(x + 1) }
+        })
+      }) {}
+
+      const x = flow(Inc.inc, Effect.map((n) => n + 2))
+
+      strictEqual(yield* x(2).pipe(Effect.provide(Inc.Default)), 5)
     }))
 })

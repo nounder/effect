@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Equal, Hash, HashSet, pipe } from "effect"
-import { assertFalse, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 class Value implements Equal.Equal {
   constructor(readonly n: number) {}
@@ -50,7 +50,7 @@ describe("HashSet", () => {
     if (typeof window !== "undefined") {
       return
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { inspect } = require("node:util")
     const map = HashSet.make(0, "a")
     deepStrictEqual(inspect(map), inspect({ _id: "HashSet", values: [0, "a"] }))

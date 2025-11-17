@@ -7,10 +7,13 @@ import * as Effectable from "effect/Effectable"
 import type { LazyArg } from "effect/Function"
 import { constant, constVoid, dual } from "effect/Function"
 import { globalValue } from "effect/GlobalValue"
+import * as Option from "effect/Option"
 import { hasProperty } from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as AST from "effect/SchemaAST"
 import * as Struct from "effect/Struct"
+import type * as FileSystem from "./FileSystem.js"
+import type * as Multipart_ from "./Multipart.js"
 
 /**
  * @since 1.0.0
@@ -18,6 +21,14 @@ import * as Struct from "effect/Struct"
  */
 export const AnnotationMultipart: unique symbol = Symbol.for(
   "@effect/platform/HttpApiSchema/AnnotationMultipart"
+)
+
+/**
+ * @since 1.0.0
+ * @category annotations
+ */
+export const AnnotationMultipartStream: unique symbol = Symbol.for(
+  "@effect/platform/HttpApiSchema/AnnotationMultipartStream"
 )
 
 /**
@@ -69,6 +80,9 @@ export const extractAnnotations = (ast: AST.Annotations): AST.Annotations => {
   if (AnnotationMultipart in ast) {
     result[AnnotationMultipart] = ast[AnnotationMultipart]
   }
+  if (AnnotationMultipartStream in ast) {
+    result[AnnotationMultipartStream] = ast[AnnotationMultipartStream]
+  }
   return result
 }
 
@@ -100,7 +114,15 @@ export const getEmptyDecodeable = (ast: AST.AST): boolean =>
  * @since 1.0.0
  * @category annotations
  */
-export const getMultipart = (ast: AST.AST): boolean => getAnnotation<boolean>(ast, AnnotationMultipart) ?? false
+export const getMultipart = (ast: AST.AST): Multipart_.withLimits.Options | undefined =>
+  getAnnotation<Multipart_.withLimits.Options>(ast, AnnotationMultipart)
+
+/**
+ * @since 1.0.0
+ * @category annotations
+ */
+export const getMultipartStream = (ast: AST.AST): Multipart_.withLimits.Options | undefined =>
+  getAnnotation<Multipart_.withLimits.Options>(ast, AnnotationMultipartStream)
 
 const encodingJson: Encoding = {
   kind: "Json",
@@ -111,13 +133,17 @@ const encodingJson: Encoding = {
  * @since 1.0.0
  * @category annotations
  */
-export const getEncoding = (ast: AST.AST): Encoding => getAnnotation<Encoding>(ast, AnnotationEncoding) ?? encodingJson
+export const getEncoding = (ast: AST.AST, fallback = encodingJson): Encoding =>
+  getAnnotation<Encoding>(ast, AnnotationEncoding) ?? fallback
 
 /**
  * @since 1.0.0
  * @category annotations
  */
-export const getParam = (ast: AST.AST): string | undefined => ast.annotations[AnnotationParam] as string | undefined
+export const getParam = (ast: AST.AST | Schema.PropertySignature.AST): string | undefined => {
+  const annotations = ast._tag === "PropertySignatureTransformation" ? ast.to.annotations : ast.annotations
+  return (annotations[AnnotationParam] as any)?.name as string | undefined
+}
 
 /**
  * @since 1.0.0
@@ -227,10 +253,13 @@ type Void$ = typeof Schema.Void
  * @since 1.0.0
  * @category path params
  */
-export interface Param<Name extends string, S extends Schema.Schema.Any>
-  extends Schema.Schema<S["Type"], S["Encoded"], S["Context"]>
+export interface Param<Name extends string, S extends Schema.Schema.Any | Schema.PropertySignature.Any>
+  extends Schema.Schema<Schema.Schema.Type<S>, Schema.Schema.Encoded<S>, Schema.Schema.Context<S>>
 {
-  readonly [AnnotationParam]: Name
+  readonly [AnnotationParam]: {
+    readonly name: Name
+    readonly schema: S
+  }
 }
 
 /**
@@ -238,19 +267,37 @@ export interface Param<Name extends string, S extends Schema.Schema.Any>
  * @category path params
  */
 export const param: {
-  <Name extends string>(name: Name): <S extends AnyString>(schema: S) => Param<Name, S>
-  <Name extends string, S extends AnyString>(name: Name, schema: S): Param<Name, S>
+  <Name extends string>(
+    name: Name
+  ): <S extends Schema.Schema.Any | Schema.PropertySignature.Any>(
+    schema:
+      & S
+      & ([Schema.Schema.Encoded<S> & {}] extends [string] ? unknown : "Schema must be encodable to a string")
+  ) => Param<Name, S>
+  <Name extends string, S extends Schema.Schema.Any | Schema.PropertySignature.Any>(
+    name: Name,
+    schema:
+      & S
+      & ([Schema.Schema.Encoded<S> & {}] extends [string] ? unknown : "Schema must be encodable to a string")
+  ): Param<Name, S>
 } = dual(
   2,
-  <Name extends string, S extends AnyString>(name: Name, schema: S): Param<Name, S> =>
-    schema.annotations({ [AnnotationParam]: name }) as any
+  <Name extends string, S extends Schema.Schema.Any | Schema.PropertySignature.Any>(
+    name: Name,
+    schema: S
+  ): Param<Name, S> => {
+    const annotations: Record<string | symbol, unknown> = {
+      [AnnotationParam]: { name, schema }
+    }
+    if (Schema.isSchema(schema)) {
+      const identifier = AST.getIdentifierAnnotation(schema.ast)
+      if (Option.isSome(identifier)) {
+        annotations[AST.IdentifierAnnotationId] = identifier.value
+      }
+    }
+    return schema.annotations(annotations) as any
+  }
 )
-
-/**
- * @since 1.0.0
- * @category path params
- */
-export type AnyString = Schema.Schema<any, string, never> | Schema.Schema<any, string, any>
 
 /**
  * @since 1.0.0
@@ -371,9 +418,54 @@ export interface Multipart<S extends Schema.Schema.Any>
  * @since 1.0.0
  * @category multipart
  */
-export const Multipart = <S extends Schema.Schema.Any>(self: S): Multipart<S> =>
+export const Multipart = <S extends Schema.Schema.Any>(self: S, options?: {
+  readonly maxParts?: Option.Option<number> | undefined
+  readonly maxFieldSize?: FileSystem.SizeInput | undefined
+  readonly maxFileSize?: Option.Option<FileSystem.SizeInput> | undefined
+  readonly maxTotalSize?: Option.Option<FileSystem.SizeInput> | undefined
+  readonly fieldMimeTypes?: ReadonlyArray<string> | undefined
+}): Multipart<S> =>
   self.annotations({
-    [AnnotationMultipart]: true
+    [AnnotationMultipart]: options ?? {}
+  }) as any
+
+/**
+ * @since 1.0.0
+ * @category multipart
+ */
+export const MultipartStreamTypeId: unique symbol = Symbol.for("@effect/platform/HttpApiSchema/MultipartStream")
+
+/**
+ * @since 1.0.0
+ * @category multipart
+ */
+export type MultipartStreamTypeId = typeof MultipartStreamTypeId
+
+/**
+ * @since 1.0.0
+ * @category multipart
+ */
+export interface MultipartStream<S extends Schema.Schema.Any> extends
+  Schema.Schema<
+    Schema.Schema.Type<S> & Brand<MultipartStreamTypeId>,
+    Schema.Schema.Encoded<S>,
+    Schema.Schema.Context<S>
+  >
+{}
+
+/**
+ * @since 1.0.0
+ * @category multipart
+ */
+export const MultipartStream = <S extends Schema.Schema.Any>(self: S, options?: {
+  readonly maxParts?: Option.Option<number> | undefined
+  readonly maxFieldSize?: FileSystem.SizeInput | undefined
+  readonly maxFileSize?: Option.Option<FileSystem.SizeInput> | undefined
+  readonly maxTotalSize?: Option.Option<FileSystem.SizeInput> | undefined
+  readonly fieldMimeTypes?: ReadonlyArray<string> | undefined
+}): MultipartStream<S> =>
+  self.annotations({
+    [AnnotationMultipartStream]: options ?? {}
   }) as any
 
 const defaultContentType = (encoding: Encoding["kind"]) => {

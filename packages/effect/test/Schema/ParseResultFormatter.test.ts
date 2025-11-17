@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertLeft, assertTrue, deepStrictEqual, strictEqual, throws } from "@effect/vitest/utils"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Either from "effect/Either"
@@ -8,8 +9,7 @@ import * as ParseResult from "effect/ParseResult"
 import * as S from "effect/Schema"
 import type { ParseOptions } from "effect/SchemaAST"
 import * as AST from "effect/SchemaAST"
-import * as Util from "effect/test/Schema/TestUtils"
-import { assertLeft, assertTrue, deepStrictEqual, strictEqual, throws } from "effect/test/util"
+import * as Util from "./TestUtils.js"
 
 const expectSyncTree = <A, I>(
   schema: S.Schema<A, I>,
@@ -161,7 +161,7 @@ describe("Formatters output", () => {
       expectSyncTree(
         schema,
         input,
-        `AsyncString
+        `(string <-> string)
 └─ cannot be be resolved synchronously, this is caused by using runSync on an effect that performs async work`
       )
       expectSyncIssues(schema, input, [{
@@ -180,7 +180,7 @@ describe("Formatters output", () => {
       expectSyncTree(
         schema,
         input,
-        `AsyncString
+        `(string <-> string)
 └─ cannot be be resolved synchronously, this is caused by using runSync on an effect that performs async work`
       )
       expectSyncIssues(schema, input, [{
@@ -1341,15 +1341,15 @@ describe("Formatters output", () => {
         expectSyncTree(
           schema,
           null,
-          `Expected A, actual null`
+          `Expected readonly [number, A | null], actual null`
         )
         expectSyncTree(
           schema,
           [1, undefined],
-          `A
+          `readonly [number, A | null]
 └─ [1]
    └─ A | null
-      ├─ Expected A, actual undefined
+      ├─ Expected readonly [number, A | null], actual undefined
       └─ Expected null, actual undefined`
         )
       })
@@ -1395,7 +1395,7 @@ describe("Formatters output", () => {
           `readonly [number, A | null]
 └─ [1]
    └─ A | null
-      ├─ Expected A, actual undefined
+      ├─ Expected readonly [number, A | null], actual undefined
       └─ Expected null, actual undefined`
         )
       })

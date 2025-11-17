@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { deepStrictEqual } from "@effect/vitest/utils"
 import * as Cause from "effect/Cause"
 import * as Chunk from "effect/Chunk"
 import * as Effect from "effect/Effect"
@@ -7,7 +8,6 @@ import { pipe } from "effect/Function"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import * as Take from "effect/Take"
-import { deepStrictEqual } from "effect/test/util"
 
 describe("Stream", () => {
   it.effect("toQueue", () =>
@@ -73,4 +73,13 @@ describe("Stream", () => {
       )
       deepStrictEqual(queue, Exit.die(new Cause.RuntimeException("die")))
     }))
+
+  it("toAsyncIterable", async () => {
+    const stream = Stream.make(1, 2, 3)
+    const results: Array<number> = []
+    for await (const result of Stream.toAsyncIterable(stream)) {
+      results.push(result)
+    }
+    deepStrictEqual(results, [1, 2, 3])
+  })
 })

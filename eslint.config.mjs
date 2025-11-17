@@ -1,3 +1,4 @@
+import * as effectEslint from "@effect/eslint-plugin"
 import { fixupPluginRules } from "@eslint/compat"
 import { FlatCompat } from "@eslint/eslintrc"
 import js from "@eslint/js"
@@ -24,9 +25,9 @@ export default [
   ...compat.extends(
     "eslint:recommended",
     "plugin:@typescript-eslint/eslint-recommended",
-    "plugin:@typescript-eslint/recommended",
-    "plugin:@effect/recommended"
+    "plugin:@typescript-eslint/recommended"
   ),
+  ...effectEslint.configs.dprint,
   {
     plugins: {
       import: fixupPluginRules(_import),
@@ -94,7 +95,9 @@ export default [
       "@typescript-eslint/no-non-null-assertion": "off",
       "@typescript-eslint/ban-types": "off",
       "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-empty-interface": "off",
+      "@typescript-eslint/no-empty-object-type": "off",
+      "@typescript-eslint/no-unsafe-function-type": "off",
+      "@typescript-eslint/no-wrapper-object-types": "off",
       "@typescript-eslint/consistent-type-imports": "warn",
 
       "@typescript-eslint/no-unused-vars": [
@@ -134,6 +137,21 @@ export default [
     files: ["packages/*/src/**/*", "packages/*/test/**/*"],
     rules: {
       "no-console": "error"
+    }
+  },
+  {
+    files: ["packages/*/src/**/*"],
+    rules: {
+      "@effect/no-import-from-barrel-package": [
+        "error",
+        {
+          packageNames: [
+            "effect",
+            "@effect/platform",
+            "@effect/sql"
+          ]
+        }
+      ]
     }
   }
 ]

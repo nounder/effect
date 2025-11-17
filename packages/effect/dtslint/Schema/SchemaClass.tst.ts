@@ -77,6 +77,15 @@ describe("Schema.Class", () => {
     NoFields.make({})
   })
 
+  it("should reject non existing props", () => {
+    class A extends S.Class<A>("A")({
+      a: S.String
+    }) {}
+
+    expect(A).type.not.toBeConstructableWith({ a: "a", b: "b" })
+    expect(A.make).type.not.toBeCallableWith({ a: "a", b: "b" })
+  })
+
   it("A class with all fields with a default should permit an empty argument in the constructor.", () => {
     class AllDefaultedFields extends S.Class<AllDefaultedFields>("AllDefaultedFields")({
       a: S.String.pipe(S.propertySignature, S.withConstructorDefault(() => ""))

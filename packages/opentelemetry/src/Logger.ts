@@ -5,10 +5,14 @@ import * as Otel from "@opentelemetry/sdk-logs"
 import type { NonEmptyReadonlyArray } from "effect/Array"
 import * as Arr from "effect/Array"
 import * as Context from "effect/Context"
+import type { DurationInput } from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FiberId from "effect/FiberId"
+import * as FiberRef from "effect/FiberRef"
+import * as FiberRefs from "effect/FiberRefs"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
+import * as Tracer from "effect/Tracer"
 import { unknownToAttributeValue } from "./internal/utils.js"
 import { Resource } from "./Resource.js"
 
@@ -40,6 +44,17 @@ export const make: Effect.Effect<
     const attributes: Record<string, any> = {
       fiberId: FiberId.threadName(options.fiberId)
     }
+
+    const maybeSpan = Context.getOption(
+      FiberRefs.getOrDefault(options.context, FiberRef.currentContext),
+      Tracer.ParentSpan
+    )
+
+    if (maybeSpan._tag === "Some") {
+      attributes.spanId = maybeSpan.value.spanId
+      attributes.traceId = maybeSpan.value.traceId
+    }
+
     for (const [key, value] of options.annotations) {
       attributes[key] = unknownToAttributeValue(value)
     }
@@ -85,27 +100,28 @@ export const layerLoggerReplace: Layer.Layer<
  */
 export const layerLoggerProvider = (
   processor: Otel.LogRecordProcessor | NonEmptyReadonlyArray<Otel.LogRecordProcessor>,
-  config?: Omit<Otel.LoggerProviderConfig, "resource">
+  config?: Omit<Otel.LoggerProviderConfig, "resource"> & {
+    readonly shutdownTimeout?: DurationInput | undefined
+  }
 ): Layer.Layer<OtelLoggerProvider, never, Resource> =>
   Layer.scoped(
     OtelLoggerProvider,
     Effect.flatMap(Resource, (resource) =>
       Effect.acquireRelease(
-        Effect.sync(() => {
-          const provider = new Otel.LoggerProvider({
+        Effect.sync(() =>
+          new Otel.LoggerProvider({
             ...(config ?? undefined),
+            processors: Arr.ensure(processor),
             resource
           })
-          if (Array.isArray(processor)) {
-            processor.forEach((p) => provider.addLogRecordProcessor(p))
-          } else {
-            provider.addLogRecordProcessor(processor as any)
-          }
-          return provider
-        }),
+        ),
         (provider) =>
-          Effect.ignoreLogged(Effect.promise(
+          Effect.promise(
             () => provider.forceFlush().then(() => provider.shutdown())
-          ))
+          ).pipe(
+            Effect.ignoreLogged,
+            Effect.interruptible,
+            Effect.timeoutOption(config?.shutdownTimeout ?? 3000)
+          )
       ))
   )

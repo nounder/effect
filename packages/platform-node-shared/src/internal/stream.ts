@@ -7,8 +7,8 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import type { LazyArg } from "effect/Function"
-import { constVoid, dual } from "effect/Function"
-import * as Mailbox from "effect/Mailbox"
+import { dual } from "effect/Function"
+import * as MutableRef from "effect/MutableRef"
 import * as Runtime from "effect/Runtime"
 import type * as AsyncInput from "effect/SingleProducerAsyncInput"
 import * as Stream from "effect/Stream"
@@ -20,10 +20,10 @@ import type { FromReadableOptions, FromWritableOptions } from "../NodeStream.js"
 export const fromReadable = <E, A = Uint8Array>(
   evaluate: LazyArg<Readable | NodeJS.ReadableStream>,
   onError: (error: unknown) => E,
-  { chunkSize }: FromReadableOptions = {}
+  options?: FromReadableOptions
 ): Stream.Stream<A, E> =>
   Stream.fromChannel(
-    fromReadableChannel<E, A>(evaluate, onError, chunkSize ? Number(chunkSize) : undefined)
+    fromReadableChannel<E, A>(evaluate, onError, options)
   )
 
 /** @internal */
@@ -108,38 +108,31 @@ export const toUint8Array = <E>(
 }
 
 /** @internal */
-export const fromDuplex = <IE, E, I = Uint8Array | string, O = Uint8Array>(
+export const fromDuplex = <IE, E, I = string | Uint8Array<ArrayBufferLike>, O = Uint8Array<ArrayBufferLike>>(
   evaluate: LazyArg<Duplex>,
   onError: (error: unknown) => E,
-  options: FromReadableOptions & FromWritableOptions = {}
-): Channel.Channel<Chunk.Chunk<O>, Chunk.Chunk<I>, IE | E, IE, void, unknown> =>
-  Channel.acquireUseRelease(
-    Effect.tap(
-      Effect.zip(
-        Effect.sync(evaluate),
-        Mailbox.make<void, IE | E>()
-      ),
-      ([duplex, mailbox]) => readableOffer(duplex, mailbox, onError)
-    ),
-    ([duplex, mailbox]) =>
-      Channel.embedInput(
-        readableTake(duplex, mailbox, options.chunkSize ? Number(options.chunkSize) : undefined),
-        writeInput(
-          duplex,
-          (cause) => mailbox.failCause(cause),
-          options
-        )
-      ),
-    ([duplex, mailbox]) =>
-      Effect.zipRight(
-        Effect.sync(() => {
-          if (!duplex.closed) {
-            duplex.destroy()
-          }
-        }),
-        mailbox.shutdown
+  options?: FromReadableOptions & FromWritableOptions
+): Channel.Channel<
+  Chunk.Chunk<O>,
+  Chunk.Chunk<I>,
+  IE | E,
+  IE
+> =>
+  Channel.suspend(() => {
+    const duplex = evaluate()
+    if (!duplex.readable) {
+      return Channel.void
+    }
+    const exit = MutableRef.make<Exit.Exit<void, IE | E> | undefined>(undefined)
+    return Channel.embedInput(
+      unsafeReadableRead<O, IE | E>(duplex, onError, exit, options),
+      writeInput<IE, I>(
+        duplex,
+        (cause) => Effect.sync(() => MutableRef.set(exit, Exit.failCause(cause))),
+        options
       )
-  )
+    )
+  })
 
 /** @internal */
 export const pipeThroughDuplex = dual<
@@ -177,13 +170,12 @@ export const pipeThroughSimple = dual<
   (self, duplex) =>
     Stream.pipeThroughChannelOrFail(
       self,
-      fromDuplex(duplex, (error) =>
-        SystemError({
+      fromDuplex(duplex, (cause) =>
+        new SystemError({
           module: "Stream",
           method: "pipeThroughSimple",
-          pathOrDescriptor: "",
           reason: "Unknown",
-          message: String(error)
+          cause
         }))
     )
 )
@@ -192,26 +184,19 @@ export const pipeThroughSimple = dual<
 export const fromReadableChannel = <E, A = Uint8Array>(
   evaluate: LazyArg<Readable | NodeJS.ReadableStream>,
   onError: (error: unknown) => E,
-  chunkSize: number | undefined
-): Channel.Channel<Chunk.Chunk<A>, unknown, E, unknown, void, unknown> =>
-  Channel.acquireUseRelease(
-    Effect.tap(
-      Effect.zip(
-        Effect.sync(evaluate),
-        Mailbox.make<void, E>()
-      ),
-      ([readable, mailbox]) => readableOffer(readable, mailbox, onError)
-    ),
-    ([readable, mailbox]) => readableTake(readable, mailbox, chunkSize),
-    ([readable, mailbox]) =>
-      Effect.zipRight(
-        Effect.sync(() => {
-          if ("closed" in readable && !readable.closed) {
-            readable.destroy()
-          }
-        }),
-        mailbox.shutdown
-      )
+  options?: FromReadableOptions | undefined
+): Channel.Channel<
+  Chunk.Chunk<A>,
+  unknown,
+  E
+> =>
+  Channel.suspend(() =>
+    unsafeReadableRead(
+      evaluate(),
+      onError,
+      MutableRef.make(undefined),
+      options
+    )
   )
 
 /** @internal */
@@ -266,59 +251,68 @@ export const writeEffect = <A>(
       loop()
     })
 
-const readableOffer = <E>(
+const unsafeReadableRead = <A, E>(
   readable: Readable | NodeJS.ReadableStream,
-  mailbox: Mailbox.Mailbox<void, E>,
-  onError: (error: unknown) => E
-) =>
-  Effect.sync(() => {
-    readable.on("readable", () => {
-      mailbox.unsafeOffer(void 0)
-    })
-    readable.on("error", (err) => {
-      mailbox.unsafeDone(Exit.fail(onError(err)))
-    })
-    readable.on("end", () => {
-      mailbox.unsafeDone(Exit.void)
-    })
-    if (readable.readable) {
-      mailbox.unsafeOffer(void 0)
+  onError: (error: unknown) => E,
+  exit: MutableRef.MutableRef<Exit.Exit<void, E> | undefined>,
+  options: FromReadableOptions | undefined
+) => {
+  if (!readable.readable) {
+    return Channel.void
+  }
+
+  const latch = Effect.unsafeMakeLatch(false)
+  function onReadable() {
+    latch.unsafeOpen()
+  }
+  function onErr(err: unknown) {
+    exit.current = Exit.fail(onError(err))
+    latch.unsafeOpen()
+  }
+  function onEnd() {
+    exit.current = Exit.void
+    latch.unsafeOpen()
+  }
+  readable.on("readable", onReadable)
+  readable.on("error", onErr)
+  readable.on("end", onEnd)
+
+  const chunkSize = options?.chunkSize ? Number(options.chunkSize) : undefined
+  const read = Channel.suspend(function loop(): Channel.Channel<Chunk.Chunk<A>, unknown, E> {
+    let item = readable.read(chunkSize) as A | null
+    if (item === null) {
+      if (exit.current) {
+        return Channel.fromEffect(exit.current)
+      }
+      latch.unsafeClose()
+      return Channel.flatMap(latch.await, loop)
+    }
+    const arr = [item as A]
+    while (true) {
+      item = readable.read(chunkSize)
+      if (item === null) {
+        return Channel.flatMap(Channel.write(Chunk.unsafeFromArray(arr)), loop)
+      }
+      arr.push(item as A)
     }
   })
 
-const readableTake = <E, A>(
-  readable: Readable | NodeJS.ReadableStream,
-  mailbox: Mailbox.Mailbox<void, E>,
-  chunkSize: number | undefined
-) => {
-  const read = readChunkChannel<A>(readable, chunkSize)
-  const loop: Channel.Channel<Chunk.Chunk<A>, unknown, E> = Channel.flatMap(
-    mailbox.takeAll,
-    ([, done]) => done ? read : Channel.zipRight(read, loop)
+  return Channel.ensuring(
+    read,
+    Effect.sync(() => {
+      readable.off("readable", onReadable)
+      readable.off("error", onErr)
+      readable.off("end", onEnd)
+      if (options?.closeOnDone !== false && "closed" in readable && !readable.closed) {
+        readable.destroy()
+      }
+    })
   )
-  return loop
 }
 
-const readChunkChannel = <A>(
-  readable: Readable | NodeJS.ReadableStream,
-  chunkSize: number | undefined
-) =>
-  Channel.suspend(() => {
-    const arr: Array<A> = []
-    let chunk = readable.read(chunkSize)
-    if (chunk === null) {
-      return Channel.void
-    }
-    while (chunk !== null) {
-      arr.push(chunk)
-      chunk = readable.read(chunkSize)
-    }
-    return Channel.write(Chunk.unsafeFromArray(arr))
-  })
-
 class StreamAdapter<E, R> extends Readable {
-  private readonly readLatch: Effect.Latch
-  private fiber: Fiber.RuntimeFiber<void, E> | undefined = undefined
+  readonly readLatch: Effect.Latch
+  fiber: Fiber.RuntimeFiber<void, E> | undefined = undefined
 
   constructor(
     runtime: Runtime.Runtime<R>,
@@ -327,40 +321,41 @@ class StreamAdapter<E, R> extends Readable {
     super({})
     this.readLatch = Effect.unsafeMakeLatch(false)
     this.fiber = Runtime.runFork(runtime)(
-      Stream.runForEachChunk(stream, (chunk) =>
-        this.readLatch.whenOpen(Effect.sync(() => {
-          if (chunk.length === 0) return
-          this.readLatch.unsafeClose()
-          for (const item of chunk) {
-            if (typeof item === "string") {
-              this.push(item, "utf8")
-            } else {
-              this.push(item)
+      this.readLatch.whenOpen(
+        Stream.runForEachChunk(stream, (chunk) =>
+          this.readLatch.whenOpen(Effect.sync(() => {
+            if (chunk.length === 0) return
+            this.readLatch.unsafeClose()
+            for (const item of chunk) {
+              if (typeof item === "string") {
+                this.push(item, "utf8")
+              } else {
+                this.push(item)
+              }
             }
-          }
-        })))
+          })))
+      )
     )
     this.fiber.addObserver((exit) => {
       this.fiber = undefined
       if (Exit.isSuccess(exit)) {
         this.push(null)
       } else {
-        this._destroy(Cause.squash(exit.cause) as any, constVoid)
+        this.destroy(Cause.squash(exit.cause) as any)
       }
     })
   }
 
   _read(_size: number): void {
-    // TODO: refactor to use unsafeOpen when added to Effect
-    Effect.runSync(this.readLatch.open)
+    this.readLatch.unsafeOpen()
   }
 
-  _destroy(_error: Error | null, callback: (error?: Error | null | undefined) => void): void {
+  _destroy(error: Error | null, callback: (error?: Error | null | undefined) => void): void {
     if (!this.fiber) {
-      return callback(null)
+      return callback(error)
     }
     Effect.runFork(Fiber.interrupt(this.fiber)).addObserver((exit) => {
-      callback(exit._tag === "Failure" ? Cause.squash(exit.cause) as any : null)
+      callback(exit._tag === "Failure" ? Cause.squash(exit.cause) as any : error)
     })
   }
 }

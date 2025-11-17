@@ -236,22 +236,60 @@ export const catchSomeDefect = dual<
 )
 
 /* @internal */
-export const catchTag = dual<
-  <K extends (E extends { _tag: string } ? E["_tag"] : never), E, A1, E1, R1>(
-    k: K,
-    f: (e: Extract<E, { _tag: K }>) => Effect.Effect<A1, E1, R1>
-  ) => <A, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A | A1, Exclude<E, { _tag: K }> | E1, R | R1>,
-  <A, E, R, K extends (E extends { _tag: string } ? E["_tag"] : never), R1, E1, A1>(
+export const catchTag: {
+  <
+    E,
+    const K extends Arr.NonEmptyReadonlyArray<E extends { _tag: string } ? E["_tag"] : never>,
+    A1,
+    E1,
+    R1
+  >(
+    ...args: [
+      ...tags: K,
+      f: (e: Extract<Types.NoInfer<E>, { _tag: K[number] }>) => Effect.Effect<A1, E1, R1>
+    ]
+  ): <A, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A | A1, Exclude<E, { _tag: K[number] }> | E1, R | R1>
+  <
+    A,
+    E,
+    R,
+    const K extends Arr.NonEmptyReadonlyArray<E extends { _tag: string } ? E["_tag"] : never>,
+    A1,
+    E1,
+    R1
+  >(
     self: Effect.Effect<A, E, R>,
-    k: K,
-    f: (e: Extract<E, { _tag: K }>) => Effect.Effect<A1, E1, R1>
-  ) => Effect.Effect<A | A1, Exclude<E, { _tag: K }> | E1, R | R1>
->(3, <A, E, R, K extends (E extends { _tag: string } ? E["_tag"] : never), R1, E1, A1>(
-  self: Effect.Effect<A, E, R>,
-  k: K,
-  f: (e: Extract<E, { _tag: K }>) => Effect.Effect<A1, E1, R1>
-): Effect.Effect<A | A1, Exclude<E, { _tag: K }> | E1, R | R1> =>
-  core.catchIf(self, Predicate.isTagged(k) as Predicate.Refinement<E, Extract<E, { _tag: K }>>, f) as any)
+    ...args: [
+      ...tags: K,
+      f: (e: Extract<Types.NoInfer<E>, { _tag: K[number] }>) => Effect.Effect<A1, E1, R1>
+    ]
+  ): Effect.Effect<A | A1, Exclude<E, { _tag: K[number] }> | E1, R | R1>
+} = dual(
+  (args: any) => core.isEffect(args[0]),
+  <A, E, R, const K extends Arr.NonEmptyReadonlyArray<E extends { _tag: string } ? E["_tag"] : never>, R1, E1, A1>(
+    self: Effect.Effect<A, E, R>,
+    ...args: [
+      ...tags: K & { [I in keyof K]: E extends { _tag: string } ? E["_tag"] : never },
+      f: (e: Extract<Types.NoInfer<E>, { _tag: K[number] }>) => Effect.Effect<A1, E1, R1>
+    ]
+  ): Effect.Effect<A | A1, Exclude<E, { _tag: K[number] }> | E1, R | R1> => {
+    const f = args[args.length - 1] as any
+    let predicate: Predicate.Predicate<E>
+    if (args.length === 2) {
+      predicate = Predicate.isTagged(args[0] as string)
+    } else {
+      predicate = (e) => {
+        const tag = Predicate.hasProperty(e, "_tag") ? e["_tag"] : undefined
+        if (!tag) return false
+        for (let i = 0; i < args.length - 1; i++) {
+          if (args[i] === tag) return true
+        }
+        return false
+      }
+    }
+    return core.catchIf(self, predicate as Predicate.Refinement<E, Extract<E, { _tag: K[number] }>>, f) as any
+  }
+) as any
 
 /** @internal */
 export const catchTags: {
@@ -507,7 +545,7 @@ export const filterMap = dual<
 export const filterOrDie: {
   <A, B extends A>(
     refinement: Predicate.Refinement<Types.NoInfer<A>, B>,
-    orDieWith: (a: Types.NoInfer<A>) => unknown
+    orDieWith: (a: Types.EqualsWith<A, B, A, Exclude<A, B>>) => unknown
   ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<B, E, R>
   <A>(
     predicate: Predicate.Predicate<Types.NoInfer<A>>,
@@ -516,7 +554,7 @@ export const filterOrDie: {
   <A, E, R, B extends A>(
     self: Effect.Effect<A, E, R>,
     refinement: Predicate.Refinement<A, B>,
-    orDieWith: (a: A) => unknown
+    orDieWith: (a: Types.EqualsWith<A, B, A, Exclude<A, B>>) => unknown
   ): Effect.Effect<B, E, R>
   <A, E, R>(
     self: Effect.Effect<A, E, R>,
@@ -547,7 +585,11 @@ export const filterOrDieMessage: {
     refinement: Predicate.Refinement<A, B>,
     message: string
   ): Effect.Effect<B, E, R>
-  <A, E, R>(self: Effect.Effect<A, E, R>, predicate: Predicate.Predicate<A>, message: string): Effect.Effect<A, E, R>
+  <A, E, R>(
+    self: Effect.Effect<A, E, R>,
+    predicate: Predicate.Predicate<A>,
+    message: string
+  ): Effect.Effect<A, E, R>
 } = dual(
   3,
   <A, E, R>(self: Effect.Effect<A, E, R>, predicate: Predicate.Predicate<A>, message: string): Effect.Effect<A, E, R> =>
@@ -556,24 +598,24 @@ export const filterOrDieMessage: {
 
 /* @internal */
 export const filterOrElse: {
-  <A, B extends A, C, E2, R2>(
+  <A, C, E2, R2, B extends A>(
     refinement: Predicate.Refinement<Types.NoInfer<A>, B>,
-    orElse: (a: Types.NoInfer<A>) => Effect.Effect<C, E2, R2>
+    orElse: (a: Types.EqualsWith<A, B, Types.NoInfer<A>, Exclude<Types.NoInfer<A>, B>>) => Effect.Effect<C, E2, R2>
   ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<B | C, E2 | E, R2 | R>
-  <A, B, E2, R2>(
+  <A, C, E2, R2>(
     predicate: Predicate.Predicate<Types.NoInfer<A>>,
-    orElse: (a: Types.NoInfer<A>) => Effect.Effect<B, E2, R2>
-  ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A | B, E2 | E, R2 | R>
-  <A, E, R, B extends A, C, E2, R2>(
+    orElse: (a: Types.NoInfer<A>) => Effect.Effect<C, E2, R2>
+  ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A | C, E2 | E, R2 | R>
+  <A, E, R, C, E2, R2, B extends A>(
     self: Effect.Effect<A, E, R>,
     refinement: Predicate.Refinement<A, B>,
-    orElse: (a: A) => Effect.Effect<C, E2, R2>
+    orElse: (a: Types.EqualsWith<A, B, A, Exclude<A, B>>) => Effect.Effect<C, E2, R2>
   ): Effect.Effect<B | C, E | E2, R | R2>
-  <A, E, R, B, E2, R2>(
+  <A, E, R, C, E2, R2>(
     self: Effect.Effect<A, E, R>,
     predicate: Predicate.Predicate<A>,
-    orElse: (a: A) => Effect.Effect<B, E2, R2>
-  ): Effect.Effect<A | B, E | E2, R | R2>
+    orElse: (a: A) => Effect.Effect<C, E2, R2>
+  ): Effect.Effect<A | C, E | E2, R | R2>
 } = dual(3, <A, E, R, B, E2, R2>(
   self: Effect.Effect<A, E, R>,
   predicate: Predicate.Predicate<A>,
@@ -586,67 +628,55 @@ export const filterOrElse: {
 
 /** @internal */
 export const liftPredicate = dual<
-  {
-    <A, B extends A, E>(
-      refinement: Predicate.Refinement<Types.NoInfer<A>, B>,
-      orFailWith: (a: Types.NoInfer<A>) => E
-    ): (a: A) => Effect.Effect<B, E>
-    <A, E>(
-      predicate: Predicate.Predicate<Types.NoInfer<A>>,
-      orFailWith: (a: Types.NoInfer<A>) => E
-    ): (a: A) => Effect.Effect<A, E>
-  },
-  {
-    <A, E, B extends A>(
-      self: A,
-      refinement: Predicate.Refinement<A, B>,
-      orFailWith: (a: A) => E
-    ): Effect.Effect<B, E>
-    <A, E>(
-      self: A,
-      predicate: Predicate.Predicate<Types.NoInfer<A>>,
-      orFailWith: (a: Types.NoInfer<A>) => E
-    ): Effect.Effect<A, E>
-  }
+  <T extends A, E, B extends T = T, A = T>(
+    predicate: Predicate.Refinement<T, B> | Predicate.Predicate<T>,
+    orFailWith: (a: Types.EqualsWith<T, B, A, Exclude<A, B>>) => E
+  ) => (a: A) => Effect.Effect<Types.EqualsWith<T, B, A, B>, E>,
+  <A, E, B extends A = A>(
+    self: A,
+    predicate: Predicate.Refinement<A, B> | Predicate.Predicate<A>,
+    orFailWith: (a: Types.EqualsWith<A, B, A, Exclude<A, B>>) => E
+  ) => Effect.Effect<B, E>
 >(
   3,
-  <A, E>(
+  <A, E, B extends A = A>(
     self: A,
-    predicate: Predicate.Predicate<Types.NoInfer<A>>,
-    orFailWith: (a: Types.NoInfer<A>) => E
-  ): Effect.Effect<A, E> => core.suspend(() => predicate(self) ? core.succeed(self) : core.fail(orFailWith(self)))
+    predicate: Predicate.Refinement<A, B> | Predicate.Predicate<A>,
+    orFailWith: (a: Types.EqualsWith<A, B, A, Exclude<A, B>>) => E
+  ): Effect.Effect<B, E> =>
+    core.suspend(() => predicate(self) ? core.succeed(self as B) : core.fail(orFailWith(self as any)))
 )
 
 /* @internal */
 export const filterOrFail: {
-  <A, B extends A, E2>(
+  <A, E2, B extends A>(
     refinement: Predicate.Refinement<Types.NoInfer<A>, B>,
-    orFailWith: (a: Types.NoInfer<A>) => E2
-  ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<B, E2 | E, R>
+    orFailWith: (a: Types.EqualsWith<A, B, Types.NoInfer<A>, Exclude<Types.NoInfer<A>, B>>) => E2
+  ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<Types.NoInfer<B>, E2 | E, R>
   <A, E2>(
     predicate: Predicate.Predicate<Types.NoInfer<A>>,
     orFailWith: (a: Types.NoInfer<A>) => E2
   ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E2 | E, R>
-  <A, B extends A>(
-    refinement: Predicate.Refinement<Types.NoInfer<A>, B>
-  ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<B, Cause.NoSuchElementException | E, R>
-  <A>(
-    predicate: Predicate.Predicate<Types.NoInfer<A>>
-  ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, Cause.NoSuchElementException | E, R>
-  <A, E, R, B extends A, E2>(
+  <A, E, R, E2, B extends A>(
     self: Effect.Effect<A, E, R>,
     refinement: Predicate.Refinement<A, B>,
-    orFailWith: (a: A) => E2
-  ): Effect.Effect<B, E | E2, R>
+    orFailWith: (a: Types.EqualsWith<A, B, A, Exclude<A, B>>) => E2
+  ): Effect.Effect<Types.NoInfer<B>, E2 | E, R>
   <A, E, R, E2>(
     self: Effect.Effect<A, E, R>,
     predicate: Predicate.Predicate<A>,
     orFailWith: (a: A) => E2
-  ): Effect.Effect<A, E | E2, R>
+  ): Effect.Effect<A, E2 | E, R>
+  <A, B extends A>(
+    refinement: Predicate.Refinement<Types.NoInfer<A>, B>
+  ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<Types.NoInfer<B>, Cause.NoSuchElementException | E, R>
+  <A>(
+    predicate: Predicate.Predicate<Types.NoInfer<A>>
+  ): <E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, Cause.NoSuchElementException | E, R>
   <A, E, R, B extends A>(
     self: Effect.Effect<A, E, R>,
     refinement: Predicate.Refinement<A, B>
-  ): Effect.Effect<B, E | Cause.NoSuchElementException, R>
+  ): Effect.Effect<Types.NoInfer<B>, E | Cause.NoSuchElementException, R>
   <A, E, R>(
     self: Effect.Effect<A, E, R>,
     predicate: Predicate.Predicate<A>
@@ -1179,17 +1209,17 @@ export const promise = <A>(evaluate: (signal: AbortSignal) => PromiseLike<A>): E
     ? core.async((resolve, signal) => {
       try {
         evaluate(signal)
-          .then((a) => resolve(core.exitSucceed(a)), (e) => resolve(core.exitDie(e)))
+          .then((a) => resolve(core.succeed(a)), (e) => resolve(core.die(e)))
       } catch (e) {
-        resolve(core.exitDie(e))
+        resolve(core.die(e))
       }
     })
     : core.async((resolve) => {
       try {
         ;(evaluate as LazyArg<PromiseLike<A>>)()
-          .then((a) => resolve(core.exitSucceed(a)), (e) => resolve(core.exitDie(e)))
+          .then((a) => resolve(core.succeed(a)), (e) => resolve(core.die(e)))
       } catch (e) {
-        resolve(core.exitDie(e))
+        resolve(core.die(e))
       }
     })
 
@@ -1657,7 +1687,7 @@ export const tryPromise: {
     return core.async((resolve, signal) => {
       try {
         evaluate(signal).then(
-          (a) => resolve(core.exitSucceed(a)),
+          (a) => resolve(core.succeed(a)),
           (e) => resolve(fail(e))
         )
       } catch (e) {
@@ -1670,7 +1700,7 @@ export const tryPromise: {
     try {
       evaluate()
         .then(
-          (a) => resolve(core.exitSucceed(a)),
+          (a) => resolve(core.succeed(a)),
           (e) => resolve(fail(e))
         )
     } catch (e) {
@@ -2096,7 +2126,8 @@ export const unsafeMakeSpan = <XA, XE>(
       options.context ?? Context.empty(),
       links,
       timingEnabled ? clock.unsafeCurrentTimeNanos() : bigint0,
-      options.kind ?? "internal"
+      options.kind ?? "internal",
+      options
     )
 
     if (annotationsFromEnv._tag === "Some") {
@@ -2138,6 +2169,7 @@ export const endSpan = <A, E>(span: Tracer.Span, exit: Exit<A, E>, clock: Clock.
       return
     }
     if (core.exitIsFailure(exit) && internalCause.spanToTrace.has(span)) {
+      // https://opentelemetry.io/docs/specs/semconv/registry/attributes/code/#code-stacktrace
       span.attribute("code.stacktrace", internalCause.spanToTrace.get(span)!())
     }
     span.end(timingEnabled ? clock.unsafeCurrentTimeNanos() : bigint0, exit)

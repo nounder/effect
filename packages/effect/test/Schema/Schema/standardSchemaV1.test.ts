@@ -1,6 +1,6 @@
+import { assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import { Context, Effect, ParseResult, Predicate, Schema } from "effect"
-import { assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 import { describe, it } from "vitest"
 import { AsyncString } from "../TestUtils.js"
 
@@ -90,6 +90,12 @@ const expectAsyncFailure = async <I, A>(
 const AsyncNonEmptyString = AsyncString.pipe(Schema.minLength(1))
 
 describe("standardSchemaV1", () => {
+  it("should return a schema", () => {
+    const schema = Schema.NumberFromString
+    const standardSchema = Schema.standardSchemaV1(schema)
+    assertTrue(Schema.isSchema(standardSchema))
+  })
+
   it("sync decoding + sync issue formatting", () => {
     const schema = Schema.NonEmptyString
     const standardSchema = Schema.standardSchemaV1(schema)
@@ -209,7 +215,7 @@ describe("standardSchemaV1", () => {
       const DepString = Schema.transformOrFail(Schema.Number, Schema.Number, {
         strict: true,
         decode: (n) =>
-          Effect.gen(function*(_) {
+          Effect.gen(function*() {
             const magicNumber = yield* MagicNumber
             return n * magicNumber
           }),
@@ -229,7 +235,7 @@ describe("standardSchemaV1", () => {
       const DepString = Schema.transformOrFail(Schema.Number, Schema.Number, {
         strict: true,
         decode: (n) =>
-          Effect.gen(function*(_) {
+          Effect.gen(function*() {
             const magicNumber = yield* MagicNumber
             yield* Effect.sleep("10 millis")
             return n * magicNumber

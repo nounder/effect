@@ -1,18 +1,8 @@
 import { describe, it } from "@effect/vitest"
 import * as S from "effect/Schema"
-import * as AST from "effect/SchemaAST"
-import * as Util from "effect/test/Schema/TestUtils"
-import { deepStrictEqual } from "effect/test/util"
+import * as Util from "../TestUtils.js"
 
 describe("NonEmptyArrayEnsure", () => {
-  it("annotations()", () => {
-    const schema = S.NonEmptyArrayEnsure(S.String).annotations({ identifier: "X" }).annotations({ title: "Y" })
-    deepStrictEqual(schema.ast.annotations, {
-      [AST.IdentifierAnnotationId]: "X",
-      [AST.TitleAnnotationId]: "Y"
-    })
-  })
-
   it("decode non-array", async () => {
     const schema = S.NonEmptyArrayEnsure(S.NumberFromString)
     await Util.assertions.decoding.succeed(schema, "123", [123])

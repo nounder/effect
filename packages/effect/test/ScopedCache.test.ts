@@ -1,5 +1,15 @@
 import { describe, it } from "@effect/vitest"
 import {
+  assertFalse,
+  assertLeft,
+  assertNone,
+  assertRight,
+  assertSome,
+  assertTrue,
+  deepStrictEqual,
+  strictEqual
+} from "@effect/vitest/utils"
+import {
   Array,
   Cause,
   Chunk,
@@ -21,18 +31,8 @@ import {
   TestServices
 } from "effect"
 import { dual } from "effect/Function"
-import {
-  assertFalse,
-  assertLeft,
-  assertNone,
-  assertRight,
-  assertSome,
-  assertTrue,
-  deepStrictEqual,
-  strictEqual
-} from "effect/test/util"
-import * as ObservableResource from "effect/test/utils/cache/ObservableResource"
-import * as WatchableLookup from "effect/test/utils/cache/WatchableLookup"
+import * as ObservableResource from "./utils/cache/ObservableResource.js"
+import * as WatchableLookup from "./utils/cache/WatchableLookup.js"
 
 const hash = dual<
   (y: number) => (x: number) => number,
@@ -192,6 +192,7 @@ describe("ScopedCache", () => {
         const cache = yield* scopedCache
         yield* (observablesResource.assertNotAcquired())
         // Not actually retreiving from the cache
+        // @effect-diagnostics-next-line floatingEffect:off
         cache.get(void 0)
         yield* (observablesResource.assertNotAcquired())
         const contains = yield* (cache.contains(void 0))

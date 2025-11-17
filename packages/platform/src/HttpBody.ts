@@ -198,9 +198,27 @@ export interface FormData extends HttpBody.Proto {
 
 /**
  * @since 1.0.0
- * @category constructors
+ * @category FormData
  */
 export const formData: (body: globalThis.FormData) => FormData = internal.formData
+
+/**
+ * @since 1.0.0
+ * @category FormData
+ */
+export type FormDataInput = Record<string, FormDataCoercible | ReadonlyArray<FormDataCoercible>>
+
+/**
+ * @since 1.0.0
+ * @category FormData
+ */
+export type FormDataCoercible = string | number | boolean | File | Blob | null | undefined
+
+/**
+ * @since 1.0.0
+ * @category FormData
+ */
+export const formDataRecord: (entries: FormDataInput) => FormData = internal.formDataRecord
 
 /**
  * @since 1.0.0
@@ -220,8 +238,7 @@ export interface Stream extends HttpBody.Proto {
 export const stream: (
   body: Stream_.Stream<globalThis.Uint8Array, unknown>,
   contentType?: string,
-  contentLength?: number,
-  etag?: string
+  contentLength?: number
 ) => Stream = internal.stream
 
 /**

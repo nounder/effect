@@ -1,5 +1,4 @@
 import { describe, it } from "@effect/vitest"
-import { Context, Differ, Option, pipe } from "effect"
 import {
   assertFalse,
   assertInclude,
@@ -11,7 +10,8 @@ import {
   deepStrictEqual,
   strictEqual,
   throws
-} from "effect/test/util"
+} from "@effect/vitest/utils"
+import { Context, Differ, Option, pipe } from "effect"
 
 interface A {
   a: number
@@ -113,7 +113,9 @@ describe("Context", () => {
       readonly FooBar: unique symbol
     }
     const Service = Context.GenericTag<FooBar, Foo | Bar>("FooBar")
-    const context = Context.make(Service, { _tag: "Foo" })
+    const context = Context.make(Service, { _tag: "Foo" }).pipe(
+      Context.add(Service, { _tag: "Foo" })
+    )
     deepStrictEqual(Context.get(context, Service), { _tag: "Foo" })
   })
 

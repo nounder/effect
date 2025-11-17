@@ -7,6 +7,7 @@
  *
  * @since 2.0.0
  */
+import type * as Effect from "./Effect.js"
 import type { Equal } from "./Equal.js"
 import type { LazyArg } from "./Function.js"
 import type { Inspectable } from "./Inspectable.js"
@@ -16,7 +17,11 @@ import type { Pipeable } from "./Pipeable.js"
 import type * as Types from "./Types.js"
 import type * as Unify from "./Unify.js"
 
-const TagTypeId: unique symbol = internal.TagTypeId
+/**
+ * @since 2.0.0
+ * @category symbol
+ */
+export const TagTypeId: unique symbol = internal.TagTypeId
 
 /**
  * @since 2.0.0
@@ -28,7 +33,7 @@ export type TagTypeId = typeof TagTypeId
  * @since 3.5.9
  * @category models
  */
-export interface Tag<in out Id, in out Value> extends Pipeable, Inspectable {
+export interface Tag<in out Id, in out Value> extends Pipeable, Inspectable, ReadonlyTag<Id, Value> {
   readonly _op: "Tag"
   readonly Service: Value
   readonly Identifier: Id
@@ -45,7 +50,27 @@ export interface Tag<in out Id, in out Value> extends Pipeable, Inspectable {
   [Unify.ignoreSymbol]?: TagUnifyIgnore
 }
 
-const ReferenceTypeId: unique symbol = internal.ReferenceTypeId
+/**
+ * @since 3.5.9
+ * @category models
+ */
+export interface ReadonlyTag<in out Id, out Value> extends Pipeable, Inspectable, Effect.Effect<Value, never, Id> {
+  readonly _op: "Tag"
+  readonly Service: Value
+  readonly Identifier: Id
+  readonly [TagTypeId]: {
+    readonly _Service: Types.Covariant<Value>
+    readonly _Identifier: Types.Invariant<Id>
+  }
+  readonly stack?: string | undefined
+  readonly key: string
+}
+
+/**
+ * @since 3.11.0
+ * @category symbol
+ */
+export const ReferenceTypeId: unique symbol = internal.ReferenceTypeId
 
 /**
  * @since 3.11.0
@@ -262,8 +287,7 @@ export const empty: () => Context<never> = internal.empty
  * @since 2.0.0
  * @category constructors
  */
-export const make: <T extends Tag<any, any>>(tag: T, service: Tag.Service<T>) => Context<Tag.Identifier<T>> =
-  internal.make
+export const make: <I, S>(tag: Tag<I, S>, service: Types.NoInfer<S>) => Context<I> = internal.make
 
 /**
  * Adds a service to a given `Context`.
@@ -290,15 +314,8 @@ export const make: <T extends Tag<any, any>>(tag: T, service: Tag.Service<T>) =>
  * @since 2.0.0
  */
 export const add: {
-  <T extends Tag<any, any>>(
-    tag: T,
-    service: Tag.Service<T>
-  ): <Services>(self: Context<Services>) => Context<Services | Tag.Identifier<T>>
-  <Services, T extends Tag<any, any>>(
-    self: Context<Services>,
-    tag: T,
-    service: Tag.Service<T>
-  ): Context<Services | Tag.Identifier<T>>
+  <I, S>(tag: Tag<I, S>, service: Types.NoInfer<S>): <Services>(self: Context<Services>) => Context<Services | I>
+  <Services, I, S>(self: Context<Services>, tag: Tag<I, S>, service: Types.NoInfer<S>): Context<Services | I>
 } = internal.add
 
 /**

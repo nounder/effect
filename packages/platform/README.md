@@ -550,14 +550,19 @@ const csv = HttpApiEndpoint.get("csv")`/users/csv`
 
 ### Setting Request Headers
 
-The `HttpApiEndpoint.setHeaders` method allows you to define the expected structure of request headers. You can specify the schema for each header and include additional metadata, such as descriptions.
+Use `HttpApiEndpoint.setHeaders` to declare a single, cumulative schema that describes all expected request headers.
+Provide one struct schema where each header name maps to its validator, and you can attach metadata such as descriptions.
 
-**Example** (Defining Request Headers with Metadata)
+> [!IMPORTANT]
+> All headers are normalized to lowercase. Always use lowercase keys in the headers schema.
+
+**Example** (Describe and validate custom headers)
 
 ```ts
 import { HttpApiEndpoint } from "@effect/platform"
 import { Schema } from "effect"
 
+// Model for successful responses
 const User = Schema.Struct({
   id: Schema.Number,
   name: Schema.String,
@@ -565,19 +570,31 @@ const User = Schema.Struct({
 })
 
 const getUsers = HttpApiEndpoint.get("getUsers", "/users")
-  // Specify the headers schema
+  // Describe the headers the endpoint expects
   .setHeaders(
+    // Declare a single struct schema for all headers
+    // Header keys MUST be lowercase in the schema
     Schema.Struct({
-      // Header must be a string
-      "X-API-Key": Schema.String,
-      // Header must be a string with an added description
-      "X-Request-ID": Schema.String.annotations({
+      // This header must be a string
+      "x-api-key": Schema.String,
+
+      // A human-friendly description is useful for generated docs (e.g. OpenAPI)
+      "x-request-id": Schema.String.annotations({
         description: "Unique identifier for the request"
       })
     })
   )
+  // Successful response: an array of User
   .addSuccess(Schema.Array(User))
 ```
+
+You can test the endpoint by sending the headers:
+
+```sh
+curl -H "X-API-Key: 1234567890" -H "X-Request-ID: 1234567890" http://localhost:3000/users
+```
+
+The server validates these headers against the declared schema before handling the request.
 
 ## Defining a HttpApiGroup
 
@@ -1121,8 +1138,7 @@ import {
   HttpApiEndpoint,
   HttpApiGroup,
   HttpMiddleware,
-  HttpServer,
-  HttpServerRequest
+  HttpServer
 } from "@effect/platform"
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
 import { Effect, Layer, Schema } from "effect"
@@ -1135,13 +1151,10 @@ const api = HttpApi.make("myApi").add(
 )
 
 const groupLive = HttpApiBuilder.group(api, "group", (handlers) =>
-  handlers.handle("get", () =>
+  handlers.handle("get", ({ request }) =>
     Effect.gen(function* () {
-      // Access the incoming request
-      const req = yield* HttpServerRequest.HttpServerRequest
-
       // Log the HTTP method for demonstration purposes
-      console.log(req.method)
+      console.log(request.method)
 
       // Return a response
       return "Hello, World!"
@@ -1225,7 +1238,7 @@ echo "abc" | curl -X POST 'http://localhost:3000/stream' --data-binary @- -H "Co
 
 ### Streaming Responses
 
-To handle streaming responses in your API, you can use `handleRaw`. The `HttpServerResponse.stream` function is designed to return a continuous stream of data as the response.
+To handle streaming responses in your API, you can return a raw `HttpServerResponse`. The `HttpServerResponse.stream` function is designed to return a continuous stream of data as the response.
 
 **Example** (Implementing a Streaming Endpoint)
 
@@ -1265,7 +1278,7 @@ const stream = Stream.make("a", "b", "c").pipe(
 )
 
 const groupLive = HttpApiBuilder.group(api, "group", (handlers) =>
-  handlers.handleRaw("getStream", () => HttpServerResponse.stream(stream))
+  handlers.handle("getStream", () => HttpServerResponse.stream(stream))
 )
 
 const MyApiLive = HttpApiBuilder.api(api).pipe(Layer.provide(groupLive))
@@ -4831,4 +4844,313 @@ Output:
   }
 }
 */
+```
+
+# HttpLayerRouter
+
+The experimental `HttpLayerRouter` module provides a simplified way to create HTTP servers.
+It aims to simplify the process of defining routes and registering other HTTP
+services like `HttpApi` or `RpcServer`'s.
+
+## Registering routes
+
+```ts
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import * as HttpLayerRouter from "@effect/platform/HttpLayerRouter"
+import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { createServer } from "http"
+
+// Here is how you can register a simple GET route
+const HelloRoute = Layer.effectDiscard(
+  Effect.gen(function* () {
+    // First, we need to access the `HttpRouter` service
+    const router = yield* HttpLayerRouter.HttpRouter
+
+    // Then, we can add a new route to the router
+    yield* router.add("GET", "/hello", HttpServerResponse.text("Hello, World!"))
+  })
+)
+
+// You can also use the `HttpLayerRouter.use` function to register a route
+const GoodbyeRoute = HttpLayerRouter.use(
+  Effect.fn(function* (router) {
+    // The `router` parameter is the `HttpRouter` service
+    yield* router.add(
+      "GET",
+      "/goodbye",
+      HttpServerResponse.text("Goodbye, World!")
+    )
+  })
+)
+// Or use `HttpLayerRouter.add/addAll` for simple routes
+const SimpleRoute = HttpLayerRouter.add(
+  "GET",
+  "/simple",
+  HttpServerResponse.text("Simply fantastic!")
+)
+
+const AllRoutes = Layer.mergeAll(HelloRoute, GoodbyeRoute, SimpleRoute)
+
+// To start the server, we use `HttpLayerRouter.serve` with the routes layer
+HttpLayerRouter.serve(AllRoutes).pipe(
+  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 })),
+  Layer.launch,
+  NodeRuntime.runMain
+)
+```
+
+## Applying middleware
+
+```ts
+import * as HttpLayerRouter from "@effect/platform/HttpLayerRouter"
+import * as HttpMiddleware from "@effect/platform/HttpMiddleware"
+import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+
+// Here is a service that we want to provide to every HTTP request
+class CurrentSession extends Context.Tag("CurrentSession")<
+  CurrentSession,
+  {
+    readonly token: string
+  }
+>() {}
+
+// Using the `HttpLayerRouter.middleware` function, we can create a middleware
+// that provides the `CurrentSession` service to every HTTP request.
+const SessionMiddleware = HttpLayerRouter.middleware<{
+  provides: CurrentSession
+}>()(
+  Effect.gen(function* () {
+    yield* Effect.log("SessionMiddleware initialized")
+
+    return (httpEffect) =>
+      Effect.provideService(httpEffect, CurrentSession, {
+        token: "dummy-token"
+      })
+  })
+)
+
+// And here is an example of global middleware, that modifies the HTTP response.
+// Global middleware directly returns a `Layer`.
+const CorsMiddleware = HttpLayerRouter.middleware(HttpMiddleware.cors(), {
+  global: true
+})
+// You can also use `HttpLayerRouter.cors()` to create a CORS middleware
+
+const HelloRoute = HttpLayerRouter.add(
+  "GET",
+  "/hello",
+  Effect.gen(function* () {
+    // We can now access the `CurrentSession` service in our route handler
+    const session = yield* CurrentSession
+    return HttpServerResponse.text(
+      `Hello, World! Your session token is: ${session.token}`
+    )
+  })
+).pipe(
+  // We can provide the `SessionMiddleware.layer` to the `HelloRoute` layer
+  Layer.provide(SessionMiddleware.layer),
+  // And we can also provide the `CorsMiddleware` layer to handle CORS
+  Layer.provide(CorsMiddleware)
+)
+```
+
+## Interdependent middleware
+
+If middleware depends on another middleware, you can use the `.combine` api to
+combine them.
+
+```ts
+import * as HttpLayerRouter from "@effect/platform/HttpLayerRouter"
+import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+
+class CurrentSession extends Context.Tag("CurrentSession")<
+  CurrentSession,
+  {
+    readonly token: string
+  }
+>() {}
+
+const SessionMiddleware = HttpLayerRouter.middleware<{
+  provides: CurrentSession
+}>()(
+  Effect.gen(function* () {
+    yield* Effect.log("SessionMiddleware initialized")
+
+    return (httpEffect) =>
+      Effect.provideService(httpEffect, CurrentSession, {
+        token: "dummy-token"
+      })
+  })
+)
+
+// Here is a middleware that uses the `CurrentSession` service
+const LogMiddleware = HttpLayerRouter.middleware(
+  Effect.gen(function* () {
+    yield* Effect.log("LogMiddleware initialized")
+
+    return Effect.fn(function* (httpEffect) {
+      const session = yield* CurrentSession
+      yield* Effect.log(`Current session token: ${session.token}`)
+      return yield* httpEffect
+    })
+  })
+)
+
+// We can then use the .combine method to combine the middlewares
+const LogAndSessionMiddleware = LogMiddleware.combine(SessionMiddleware)
+
+const HelloRoute = HttpLayerRouter.add(
+  "GET",
+  "/hello",
+  Effect.gen(function* () {
+    const session = yield* CurrentSession
+    return HttpServerResponse.text(
+      `Hello, World! Your session token is: ${session.token}`
+    )
+  })
+).pipe(Layer.provide(LogAndSessionMiddleware.layer))
+```
+
+## Registering a HttpApi
+
+```ts
+import {
+  HttpApi,
+  HttpApiBuilder,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiScalar,
+  HttpLayerRouter
+} from "@effect/platform"
+import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
+import { Effect, Layer } from "effect"
+import { createServer } from "http"
+
+// First, we define our HttpApi
+class MyApi extends HttpApi.make("api").add(
+  HttpApiGroup.make("users")
+    .add(HttpApiEndpoint.get("me", "/me"))
+    .prefix("/users")
+) {}
+
+// Implement the handlers for the API
+const UsersApiLayer = HttpApiBuilder.group(MyApi, "users", (handers) =>
+  handers.handle("me", () => Effect.void)
+)
+
+// Use `HttpLayerRouter.addHttpApi` to register the API with the router
+const HttpApiRoutes = HttpLayerRouter.addHttpApi(MyApi, {
+  openapiPath: "/docs/openapi.json"
+}).pipe(
+  // Provide the api handlers layer
+  Layer.provide(UsersApiLayer)
+)
+
+// Create a /docs route for the API documentation
+const DocsRoute = HttpApiScalar.layerHttpLayerRouter({
+  api: MyApi,
+  path: "/docs"
+})
+
+// Finally, we merge all routes and serve them using the Node HTTP server
+const AllRoutes = Layer.mergeAll(HttpApiRoutes, DocsRoute).pipe(
+  Layer.provide(HttpLayerRouter.cors())
+)
+
+HttpLayerRouter.serve(AllRoutes).pipe(
+  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 })),
+  Layer.launch,
+  NodeRuntime.runMain
+)
+```
+
+## Registering a RpcServer
+
+```ts
+import { HttpLayerRouter } from "@effect/platform"
+import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
+import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "@effect/rpc"
+import { Effect, Layer, Schema } from "effect"
+import { createServer } from "http"
+
+export class User extends Schema.Class<User>("User")({
+  id: Schema.String,
+  name: Schema.String
+}) {}
+
+// Define a group of RPCs
+export class UserRpcs extends RpcGroup.make(
+  Rpc.make("UserById", {
+    success: User,
+    error: Schema.String, // Indicates that errors, if any, will be returned as strings
+    payload: {
+      id: Schema.String
+    }
+  })
+) {}
+
+const UserHandlers = UserRpcs.toLayer({
+  UserById: ({ id }) => Effect.succeed(new User({ id, name: "John Doe" }))
+})
+
+// Use `HttpLayerRouter` to register the rpc server
+const RpcRoute = RpcServer.layerHttpRouter({
+  group: UserRpcs,
+  path: "/rpc"
+}).pipe(
+  Layer.provide(UserHandlers),
+  Layer.provide(RpcSerialization.layerJson),
+  Layer.provide(HttpLayerRouter.cors()) // provide CORS middleware
+)
+
+// Start the HTTP server with the RPC route
+HttpLayerRouter.serve(RpcRoute).pipe(
+  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 })),
+  Layer.launch,
+  NodeRuntime.runMain
+)
+```
+
+## Create a web handler
+
+```ts
+import * as HttpLayerRouter from "@effect/platform/HttpLayerRouter"
+import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
+import * as Effect from "effect/Effect"
+
+const HelloRoute = HttpLayerRouter.use(
+  Effect.fn(function* (router) {
+    yield* router.add(
+      "GET",
+      "/hello",
+      HttpServerResponse.text("Hellow, World!")
+    )
+  })
+)
+
+const { dispose, handler } = HttpLayerRouter.toWebHandler(HelloRoute)
+
+// When the process is interrupted, we want to clean up resources
+process.on("SIGINT", () => {
+  dispose().then(
+    () => {
+      process.exit(0)
+    },
+    () => {
+      process.exit(1)
+    }
+  )
+})
+
+// Use the handler in your server setup
+export { handler }
 ```

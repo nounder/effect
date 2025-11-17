@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Equal, Hash, Number as Num, pipe, SortedMap as SM } from "effect"
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 class Key implements Equal.Equal {
   constructor(readonly id: number) {}
@@ -81,7 +81,7 @@ describe("SortedMap", () => {
     if (typeof window !== "undefined") {
       return
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { inspect } = require("node:util")
 
     const map = makeNumericSortedMap([0, 10], [1, 20], [2, 30])

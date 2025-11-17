@@ -1,5 +1,7 @@
 import { describe, it } from "@effect/vitest"
+import { assertFailure, assertSuccess, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import {
+  Brand,
   Cause,
   Chunk,
   Config,
@@ -15,7 +17,12 @@ import {
   Redacted,
   Secret
 } from "effect"
-import { assertFailure, assertSuccess, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
+
+type Str = Brand.Branded<string, "Str">
+const Str = Brand.refined<Str>(
+  (n) => n.length > 2,
+  (n) => Brand.error(`Brand: Expected ${n} to be longer than 2`)
+)
 
 const assertConfigError = <A>(
   config: Config.Config<A>,
@@ -45,7 +52,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["ITEMS", "value"]],
-        ConfigError.InvalidData(["ITEMS"], "Expected a boolean value but received value")
+        ConfigError.InvalidData(["ITEMS"], `Expected a boolean value but received "value"`)
       )
     })
 
@@ -64,7 +71,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["BOOL", "value"]],
-        ConfigError.InvalidData(["BOOL"], "Expected a boolean value but received value")
+        ConfigError.InvalidData(["BOOL"], `Expected a boolean value but received "value"`)
       )
     })
   })
@@ -80,12 +87,75 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["WEBSITE_URL", "abra-kadabra"]],
-        ConfigError.InvalidData(["WEBSITE_URL"], "Expected an URL value but received abra-kadabra")
+        ConfigError.InvalidData(["WEBSITE_URL"], `Expected an URL value but received "abra-kadabra"`)
       )
       assertConfigError(
         config,
         [],
         ConfigError.MissingData(["WEBSITE_URL"], "Expected WEBSITE_URL to exist in the provided map")
+      )
+    })
+  })
+
+  describe("port", () => {
+    it("name != undefined", () => {
+      const config = Config.port("WEBSITE_PORT")
+
+      assertConfig(
+        config,
+        [["WEBSITE_PORT", "123"]],
+        123
+      )
+      assertConfigError(
+        config,
+        [["WEBSITE_PORT", "abra-kadabra"]],
+        ConfigError.InvalidData(["WEBSITE_PORT"], `Expected a network port value but received "abra-kadabra"`)
+      )
+      assertConfigError(
+        config,
+        [],
+        ConfigError.MissingData(["WEBSITE_PORT"], "Expected WEBSITE_PORT to exist in the provided map")
+      )
+    })
+  })
+
+  describe("branded", () => {
+    it("name != undefined", () => {
+      const config = Config.branded(Config.string("STR"), Str)
+
+      assertConfig(
+        config,
+        [["STR", "123"]],
+        Str("123")
+      )
+      assertConfigError(
+        config,
+        [["STR", "1"]],
+        ConfigError.InvalidData(["STR"], "Brand: Expected 1 to be longer than 2")
+      )
+      assertConfigError(
+        config,
+        [],
+        ConfigError.MissingData(["STR"], "Expected STR to exist in the provided map")
+      )
+    })
+    it("name != undefined from name", () => {
+      const config = Config.branded("STR", Str)
+
+      assertConfig(
+        config,
+        [["STR", "123"]],
+        Str("123")
+      )
+      assertConfigError(
+        config,
+        [["STR", "1"]],
+        ConfigError.InvalidData(["STR"], "Brand: Expected 1 to be longer than 2")
+      )
+      assertConfigError(
+        config,
+        [],
+        ConfigError.MissingData(["STR"], "Expected STR to exist in the provided map")
       )
     })
   })
@@ -116,12 +186,12 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["ITEMS", "123qq"]],
-        ConfigError.InvalidData(["ITEMS"], "Expected a number value but received 123qq")
+        ConfigError.InvalidData(["ITEMS"], `Expected a number value but received "123qq"`)
       )
       assertConfigError(
         config,
         [["ITEMS", "value"]],
-        ConfigError.InvalidData(["ITEMS"], "Expected a number value but received value")
+        ConfigError.InvalidData(["ITEMS"], `Expected a number value but received "value"`)
       )
     })
 
@@ -138,7 +208,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["NUMBER", "value"]],
-        ConfigError.InvalidData(["NUMBER"], "Expected a number value but received value")
+        ConfigError.InvalidData(["NUMBER"], `Expected a number value but received "value"`)
       )
     })
   })
@@ -150,7 +220,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["ITEMS", "value"]],
-        ConfigError.InvalidData(["ITEMS"], "Expected one of (a, b) but received value")
+        ConfigError.InvalidData(["ITEMS"], `Expected one of (a, b) but received "value"`)
       )
     })
 
@@ -171,7 +241,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["LITERAL", "value"]],
-        ConfigError.InvalidData(["LITERAL"], "Expected one of (a, 0, -0.3, 5, false, null) but received value")
+        ConfigError.InvalidData(["LITERAL"], `Expected one of (a, 0, -0.3, 5, false, null) but received "value"`)
       )
     })
   })
@@ -183,7 +253,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["", "value"]],
-        ConfigError.InvalidData([], "Expected a Date value but received value")
+        ConfigError.InvalidData([], `Expected a Date value but received "value"`)
       )
     })
 
@@ -195,7 +265,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["DATE", "value"]],
-        ConfigError.InvalidData(["DATE"], "Expected a Date value but received value")
+        ConfigError.InvalidData(["DATE"], `Expected a Date value but received "value"`)
       )
     })
   })
@@ -235,7 +305,7 @@ describe("Config", () => {
       const config = Config.logLevel()
       assertConfig(config, [["", "DEBUG"]], LogLevel.Debug)
 
-      assertConfigError(config, [["", "-"]], ConfigError.InvalidData([], "Expected a log level but received -"))
+      assertConfigError(config, [["", "-"]], ConfigError.InvalidData([], `Expected a log level but received "-"`))
     })
 
     it("name != undefined", () => {
@@ -245,7 +315,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["LOG_LEVEL", "-"]],
-        ConfigError.InvalidData(["LOG_LEVEL"], "Expected a log level but received -")
+        ConfigError.InvalidData(["LOG_LEVEL"], `Expected a log level but received "-"`)
       )
     })
   })
@@ -255,7 +325,7 @@ describe("Config", () => {
       const config = Config.duration()
       assertConfig(config, [["", "10 seconds"]], Duration.decode("10 seconds"))
 
-      assertConfigError(config, [["", "-"]], ConfigError.InvalidData([], "Expected a duration but received -"))
+      assertConfigError(config, [["", "-"]], ConfigError.InvalidData([], `Expected a duration but received "-"`))
     })
 
     it("name != undefined", () => {
@@ -265,7 +335,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["DURATION", "-"]],
-        ConfigError.InvalidData(["DURATION"], "Expected a duration but received -")
+        ConfigError.InvalidData(["DURATION"], `Expected a duration but received "-"`)
       )
     })
   })
@@ -330,13 +400,13 @@ describe("Config", () => {
         config,
         [["key", "1.2"]],
         // available data but not an integer
-        ConfigError.InvalidData(["key"], "Expected an integer value but received 1.2")
+        ConfigError.InvalidData(["key"], `Expected an integer value but received "1.2"`)
       )
       assertConfigError(
         config,
         [["key", "value"]],
         // available data but not an integer
-        ConfigError.InvalidData(["key"], "Expected an integer value but received value")
+        ConfigError.InvalidData(["key"], `Expected an integer value but received "value"`)
       )
     })
 
@@ -353,7 +423,7 @@ describe("Config", () => {
         [["key2", "value"]],
         ConfigError.And(
           ConfigError.MissingData(["key1"], "Expected key1 to exist in the provided map"),
-          ConfigError.InvalidData(["key2"], "Expected an integer value but received value")
+          ConfigError.InvalidData(["key2"], `Expected an integer value but received "value"`)
         )
       )
     })
@@ -372,7 +442,7 @@ describe("Config", () => {
         [["key2", "value"]],
         ConfigError.Or(
           ConfigError.MissingData(["key1"], "Expected key1 to exist in the provided map"),
-          ConfigError.InvalidData(["key2"], "Expected an integer value but received value")
+          ConfigError.InvalidData(["key2"], `Expected an integer value but received "value"`)
         )
       )
     })
@@ -390,7 +460,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["key", "value"]],
-        ConfigError.InvalidData(["key"], "Expected an integer value but received value")
+        ConfigError.InvalidData(["key"], `Expected an integer value but received "value"`)
       )
     })
 
@@ -405,7 +475,7 @@ describe("Config", () => {
         config,
         [["key1", "value"]],
         ConfigError.And(
-          ConfigError.InvalidData(["key1"], "Expected an integer value but received value"),
+          ConfigError.InvalidData(["key1"], `Expected an integer value but received "value"`),
           ConfigError.MissingData(["key2"], "Expected key2 to exist in the provided map")
         )
       )
@@ -414,7 +484,7 @@ describe("Config", () => {
         [["key2", "value"]],
         ConfigError.And(
           ConfigError.MissingData(["key1"], "Expected key1 to exist in the provided map"),
-          ConfigError.InvalidData(["key2"], "Expected an integer value but received value")
+          ConfigError.InvalidData(["key2"], `Expected an integer value but received "value"`)
         )
       )
     })
@@ -432,7 +502,7 @@ describe("Config", () => {
         [["key2", "value"]],
         ConfigError.Or(
           ConfigError.MissingData(["key1"], "Expected key1 to exist in the provided map"),
-          ConfigError.InvalidData(["key2"], "Expected an integer value but received value")
+          ConfigError.InvalidData(["key2"], `Expected an integer value but received "value"`)
         )
       )
     })
@@ -478,7 +548,7 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["key1", "123"], ["items", "1,value,3"], ["option", "123"], ["secret", "sauce"], ["key2", "value"]],
-        ConfigError.InvalidData(["items"], "Expected an integer value but received value")
+        ConfigError.InvalidData(["items"], `Expected an integer value but received "value"`)
       )
     })
   })
@@ -506,12 +576,12 @@ describe("Config", () => {
         assertConfigError(
           config,
           [["NUMBER", "value"], ["BOOL", "true"]],
-          ConfigError.InvalidData(["NUMBER"], "Expected a number value but received value")
+          ConfigError.InvalidData(["NUMBER"], `Expected a number value but received "value"`)
         )
         assertConfigError(
           config,
           [["NUMBER", "1"], ["BOOL", "value"]],
-          ConfigError.InvalidData(["BOOL"], "Expected a boolean value but received value")
+          ConfigError.InvalidData(["BOOL"], `Expected a boolean value but received "value"`)
         )
       })
     })
@@ -523,12 +593,12 @@ describe("Config", () => {
       assertConfigError(
         config,
         [["NUMBER", "value"], ["BOOL", "true"]],
-        ConfigError.InvalidData(["NUMBER"], "Expected a number value but received value")
+        ConfigError.InvalidData(["NUMBER"], `Expected a number value but received "value"`)
       )
       assertConfigError(
         config,
         [["NUMBER", "1"], ["BOOL", "value"]],
-        ConfigError.InvalidData(["BOOL"], "Expected a boolean value but received value")
+        ConfigError.InvalidData(["BOOL"], `Expected a boolean value but received "value"`)
       )
     })
   })
@@ -631,5 +701,21 @@ describe("Config", () => {
       Effect.runSync
     )
     deepStrictEqual(result, [1, 2, 3])
+  })
+
+  it("ConfigError message", () => {
+    const missingData = ConfigError.MissingData(["PATH"], "missing PATH")
+    const invalidData = ConfigError.InvalidData(["PATH1"], "invalid PATH1")
+    const andError = ConfigError.And(missingData, invalidData)
+    const orError = ConfigError.Or(missingData, invalidData)
+
+    strictEqual(
+      andError.message,
+      "(Missing data at PATH: \"missing PATH\") and (Invalid data at PATH1: \"invalid PATH1\")"
+    )
+    strictEqual(
+      orError.message,
+      "(Missing data at PATH: \"missing PATH\") or (Invalid data at PATH1: \"invalid PATH1\")"
+    )
   })
 })

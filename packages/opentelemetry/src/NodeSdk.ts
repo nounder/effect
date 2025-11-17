@@ -1,12 +1,13 @@
 /**
  * @since 1.0.0
  */
-import type * as Resources from "@opentelemetry/resources"
+import type * as OtelApi from "@opentelemetry/api"
 import type { LoggerProviderConfig, LogRecordProcessor } from "@opentelemetry/sdk-logs"
 import type { MetricReader } from "@opentelemetry/sdk-metrics"
 import type { SpanProcessor, TracerConfig } from "@opentelemetry/sdk-trace-base"
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node"
 import type { NonEmptyReadonlyArray } from "effect/Array"
+import type { DurationInput } from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { constant, type LazyArg } from "effect/Function"
 import * as Layer from "effect/Layer"
@@ -29,8 +30,9 @@ export interface Configuration {
   readonly resource?: {
     readonly serviceName: string
     readonly serviceVersion?: string
-    readonly attributes?: Resources.ResourceAttributes
+    readonly attributes?: OtelApi.Attributes
   } | undefined
+  readonly shutdownTimeout?: DurationInput | undefined
 }
 
 /**
@@ -39,7 +41,9 @@ export interface Configuration {
  */
 export const layerTracerProvider = (
   processor: SpanProcessor | NonEmptyReadonlyArray<SpanProcessor>,
-  config?: Omit<TracerConfig, "resource">
+  config?: Omit<TracerConfig, "resource"> & {
+    readonly shutdownTimeout?: DurationInput | undefined
+  }
 ): Layer.Layer<Tracer.OtelTracerProvider, never, Resource.Resource> =>
   Layer.scoped(
     Tracer.OtelTracerProvider,
@@ -50,16 +54,17 @@ export const layerTracerProvider = (
           Effect.sync(() => {
             const provider = new NodeTracerProvider({
               ...(config ?? undefined),
-              resource
+              resource,
+              spanProcessors: Array.isArray(processor) ? (processor as any) : [processor]
             })
-            if (Array.isArray(processor)) {
-              processor.forEach((p) => provider.addSpanProcessor(p))
-            } else {
-              provider.addSpanProcessor(processor as any)
-            }
             return provider
           }),
-          (provider) => Effect.ignoreLogged(Effect.promise(() => provider.forceFlush().then(() => provider.shutdown())))
+          (provider) =>
+            Effect.promise(() => provider.forceFlush().then(() => provider.shutdown())).pipe(
+              Effect.ignoreLogged,
+              Effect.interruptible,
+              Effect.timeoutOption(config?.shutdownTimeout ?? 3000)
+            )
         )
     )
   )
@@ -83,17 +88,26 @@ export const layer: {
         const ResourceLive = Resource.layerFromEnv(config.resource && Resource.configToAttributes(config.resource))
 
         const TracerLive = isNonEmpty(config.spanProcessor)
-          ? Layer.provide(Tracer.layer, layerTracerProvider(config.spanProcessor, config.tracerConfig))
+          ? Layer.provide(
+            Tracer.layer,
+            layerTracerProvider(config.spanProcessor, {
+              ...config.tracerConfig,
+              shutdownTimeout: config.shutdownTimeout
+            })
+          )
           : Layer.empty
 
         const MetricsLive = isNonEmpty(config.metricReader)
-          ? Metrics.layer(constant(config.metricReader))
+          ? Metrics.layer(constant(config.metricReader), config)
           : Layer.empty
 
         const LoggerLive = isNonEmpty(config.logRecordProcessor)
           ? Layer.provide(
             Logger.layerLoggerAdd,
-            Logger.layerLoggerProvider(config.logRecordProcessor, config.loggerProviderConfig)
+            Logger.layerLoggerProvider(config.logRecordProcessor, {
+              ...config.loggerProviderConfig,
+              shutdownTimeout: config.shutdownTimeout
+            })
           )
           : Layer.empty
 

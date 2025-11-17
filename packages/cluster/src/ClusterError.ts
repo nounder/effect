@@ -23,13 +23,13 @@ export type TypeId = typeof TypeId
 
 /**
  * Represents an error that occurs when a Runner receives a message for an entity
- * that it is not responsible for managing.
+ * that it is not assigned to it.
  *
  * @since 1.0.0
  * @category errors
  */
-export class EntityNotManagedByRunner extends Schema.TaggedError<EntityNotManagedByRunner>()(
-  "EntityNotManagedByRunner",
+export class EntityNotAssignedToRunner extends Schema.TaggedError<EntityNotAssignedToRunner>()(
+  "EntityNotAssignedToRunner",
   { address: EntityAddress }
 ) {
   /**
@@ -40,8 +40,8 @@ export class EntityNotManagedByRunner extends Schema.TaggedError<EntityNotManage
   /**
    * @since 1.0.0
    */
-  static is(u: unknown): u is EntityNotManagedByRunner {
-    return hasProperty(u, TypeId) && isTagged(u, "EntityNotManagedByRunner")
+  static is(u: unknown): u is EntityNotAssignedToRunner {
+    return hasProperty(u, TypeId) && isTagged(u, "EntityNotAssignedToRunner")
   }
 }
 

@@ -1,8 +1,9 @@
 import type { Either, Types } from "effect"
-import { Effect, hole, Option, pipe, Predicate, Schedule } from "effect"
-import type { NonEmptyReadonlyArray } from "effect/Array"
-import type { Cause, UnknownException } from "effect/Cause"
-import { describe, expect, it } from "tstyche"
+import { Array as Arr, Context, Effect, hole, Option, pipe, Predicate, Schedule } from "effect"
+import type { NonEmptyArray, NonEmptyReadonlyArray } from "effect/Array"
+import type { Cause, NoSuchElementException, UnknownException } from "effect/Cause"
+import type { Exit } from "effect/Exit"
+import { describe, expect, it, when } from "tstyche"
 
 class TestError1 {
   readonly _tag = "TestError1"
@@ -10,6 +11,8 @@ class TestError1 {
 class TestError2 {
   readonly _tag = "TestError2"
 }
+
+class TestService extends Context.Tag("TestService")<TestService, {}>() {}
 
 declare const string: Effect.Effect<string, "err-1", "dep-1">
 declare const number: Effect.Effect<number, "err-2", "dep-2">
@@ -436,6 +439,17 @@ describe("Effect", () => {
         )
       )
     ).type.toBe<Effect.Effect<"a", "a">>()
+    expect(
+      Effect.succeed<"a" | "b">("a").pipe(
+        Effect.filterOrFail(
+          (s): s is "a" => s === "a",
+          (x) => {
+            expect(x).type.toBe<"b">()
+            return "a" as const
+          }
+        )
+      )
+    ).type.toBe<Effect.Effect<"a", "a">>()
   })
 
   it("filterOrDie", () => {
@@ -445,6 +459,18 @@ describe("Effect", () => {
           tacitStringPredicate,
           (x) => {
             expect(x).type.toBe<"a">()
+            return "fail"
+          }
+        )
+      )
+    ).type.toBe<Effect.Effect<"a">>()
+
+    expect(
+      Effect.succeed<"a" | "b">("a").pipe(
+        Effect.filterOrDie(
+          (s): s is "a" => s === "a",
+          (x) => {
+            expect(x).type.toBe<"b">()
             return "fail"
           }
         )
@@ -486,13 +512,24 @@ describe("Effect", () => {
         )
       )
     ).type.toBe<Effect.Effect<"a", "a">>()
+
+    expect(
+      Effect.succeed(numberArray).pipe(
+        Effect.filterOrElse(
+          Arr.isNonEmptyArray,
+          () => Effect.fail("a" as const)
+        )
+      )
+    ).type.toBe<Effect.Effect<NonEmptyArray<number>, "a">>()
   })
 
   it("tap", () => {
-    // @ts-expect-error: No overload matches this call
-    Effect.succeed("a" as const).pipe(Effect.tap(tacitStringError, { onlyEffect: true }))
-    // @ts-expect-error: No overload matches this call
-    Effect.succeed("a" as const).pipe(Effect.tap("a", { onlyEffect: true }))
+    when(Effect.succeed("a" as const).pipe).isCalledWith(
+      expect(Effect.tap).type.not.toBeCallableWith(tacitStringError, { onlyEffect: true })
+    )
+    when(Effect.succeed("a" as const).pipe).isCalledWith(
+      expect(Effect.tap).type.not.toBeCallableWith("a", { onlyEffect: true })
+    )
 
     expect(Effect.succeed("a" as const).pipe(Effect.tap(tacitString))).type.toBe<Effect.Effect<"a">>()
 
@@ -593,16 +630,40 @@ describe("Effect", () => {
     ).type.toBe<Effect.Effect<number, TestError1 | TestError2>>()
   })
 
-  it("catchTag", () => {
-    // @ts-expect-error: Argument of type '"wrong"' is not assignable to parameter of type '"TestError1"'
-    Effect.catchTag(hole<Effect.Effect<number, TestError1>>(), "wrong", () => Effect.succeed(1))
-    // @ts-expect-error: Argument of type '"wrong"' is not assignable to parameter of type '"TestError1"'
-    pipe(hole<Effect.Effect<number, TestError1>>(), Effect.catchTag("wrong", () => Effect.succeed(1)))
+  it("catchIf", () => {
+    expect(pipe(
+      Effect.fail<TestError1 | Error>(new TestError1()),
+      Effect.catchIf(
+        (error) => {
+          expect(error).type.toBe<TestError1 | Error>()
+          return true
+        },
+        Effect.succeed
+      ),
+      Effect.exit
+    )).type.toBe<Effect.Effect<Exit<Error | TestError1, Error | TestError1>, never, never>>()
+  })
 
-    // @ts-expect-error: Argument of type '"wrong"' is not assignable to parameter of type '"TestError1"'
-    Effect.catchTag(hole<Effect.Effect<number, Error | TestError1>>(), "wrong", () => Effect.succeed(1))
-    // @ts-expect-error: Argument of type '"wrong"' is not assignable to parameter of type '"TestError1"'
-    pipe(hole<Effect.Effect<number, Error | TestError1>>(), Effect.catchTag("wrong", () => Effect.succeed(1)))
+  it("catchTag", () => {
+    expect(Effect.catchTag).type.not.toBeCallableWith(
+      hole<Effect.Effect<number, TestError1>>(),
+      "wrong",
+      () => Effect.succeed(1)
+    )
+    when(pipe).isCalledWith(
+      hole<Effect.Effect<number, TestError1>>(),
+      expect(Effect.catchTag).type.not.toBeCallableWith("wrong", () => Effect.succeed(1))
+    )
+
+    expect(Effect.catchTag).type.not.toBeCallableWith(
+      hole<Effect.Effect<number, Error | TestError1>>(),
+      "wrong",
+      () => Effect.succeed(1)
+    )
+    when(pipe).isCalledWith(
+      hole<Effect.Effect<number, Error | TestError1>>(),
+      expect(Effect.catchTag).type.not.toBeCallableWith("wrong", () => Effect.succeed(1))
+    )
 
     expect(Effect.catchTag(
       hole<Effect.Effect<number, Error | TestError1 | TestError2>>(),
@@ -665,6 +726,17 @@ describe("Effect", () => {
         return Effect.succeed(1)
       })
     )).type.toBe<Effect.Effect<number, Error>>()
+
+    expect(pipe(
+      hole<Effect.Effect<number, TestError1 | Error>>(),
+      Effect.catchTag(
+        "TestError1",
+        Effect.fn(function*(e) {
+          expect(e).type.toBe<TestError1>()
+          return 1
+        })
+      )
+    )).type.toBe<Effect.Effect<number, Error>>()
   })
 
   it("catchTags", () => {
@@ -678,33 +750,29 @@ describe("Effect", () => {
       })
     )).type.toBe<Effect.Effect<number, Error>>()
 
-    pipe(
+    when(pipe).isCalledWith(
       Effect.fail(new TestError1()),
-      Effect.catchTags({
+      expect(Effect.catchTags).type.not.toBeCallableWith({
         TestError1: () => Effect.succeed(1),
-        // @ts-expect-error: Type '() => Effect.Effect<number, never, never>' is not assignable to type 'never'
         Other: () => Effect.succeed(1)
       })
     )
 
-    Effect.catchTags(Effect.fail(new TestError1()), {
+    expect(Effect.catchTags).type.not.toBeCallableWith(Effect.fail(new TestError1()), {
       TestError1: () => Effect.succeed(1),
-      // @ts-expect-error: Type '() => Effect.Effect<number, never, never>' is not assignable to type 'never'
       Other: () => Effect.succeed(1)
     })
 
-    pipe(
+    when(pipe).isCalledWith(
       Effect.fail(new TestError1() as TestError1 | string),
-      Effect.catchTags({
+      expect(Effect.catchTags).type.not.toBeCallableWith({
         TestError1: () => Effect.succeed(1),
-        // @ts-expect-error: Type '() => Effect.Effect<number, never, never>' is not assignable to type 'never'
         Other: () => Effect.succeed(1)
       })
     )
 
-    Effect.catchTags(Effect.fail(new TestError1() as TestError1 | string), {
+    expect(Effect.catchTags).type.not.toBeCallableWith(Effect.fail(new TestError1() as TestError1 | string), {
       TestError1: () => Effect.succeed(1),
-      // @ts-expect-error: Type '() => Effect.Effect<number, never, never>' is not assignable to type 'never'
       Other: () => Effect.succeed(1)
     })
 
@@ -1256,14 +1324,23 @@ describe("Effect", () => {
     expect(pipe(
       primitiveNumberOrString,
       Effect.liftPredicate(Predicate.isString, (sn) => {
-        expect(sn).type.toBe<string | number>()
+        expect(sn).type.toBe<number>()
         return "b" as const
       })
     )).type.toBe<Effect.Effect<string, "b">>()
     expect(Effect.liftPredicate(primitiveNumberOrString, Predicate.isString, (sn) => {
-      expect(sn).type.toBe<string | number>()
+      expect(sn).type.toBe<number>()
       return "b" as const
     })).type.toBe<Effect.Effect<string, "b">>()
+
+    expect(Effect.liftPredicate(hole<Predicate.Refinement<string | number, number>>(), (sn) => {
+      expect(sn).type.toBe<string>()
+      return "b" as const
+    })).type.toBe<(a: string | number) => Effect.Effect<number, "b">>()
+    expect(Effect.liftPredicate(Predicate.isString, (sn) => {
+      expect(sn).type.toBe<unknown>()
+      return "b" as const
+    })).type.toBe<(a: unknown) => Effect.Effect<string, "b">>()
 
     expect(pipe(
       primitiveNumberOrString,
@@ -1273,7 +1350,7 @@ describe("Effect", () => {
           return typeof sn === "number"
         },
         (sn) => {
-          expect(sn).type.toBe<string | number>()
+          expect(sn).type.toBe<string>()
           return "b" as const
         }
       )
@@ -1282,7 +1359,7 @@ describe("Effect", () => {
       expect(sn).type.toBe<string | number>()
       return typeof sn === "number"
     }, (sn) => {
-      expect(sn).type.toBe<string | number>()
+      expect(sn).type.toBe<string>()
       return "b" as const
     })).type.toBe<Effect.Effect<number, "b">>()
 
@@ -1423,6 +1500,52 @@ describe("Effect", () => {
       })
     )).type.toBe<
       Effect.Effect<Option.Option<string>, "err-1", "dep-1">
+    >()
+  })
+
+  it("fn", () => {
+    const fn = Effect.fn((a?: string) => Effect.succeed(a), Effect.asVoid)
+    expect(fn).type.toBe<(this: unknown, a?: string | undefined) => Effect.Effect<void, never, never>>()
+  })
+
+  it("fn returns Effect subtype", () => {
+    const fnNonGen = Effect.fn((a?: string) => Effect.succeed(a), () => Option.some("test"))
+    const fnGen = Effect.fn(function*(a?: string) {
+      return Effect.succeed(a)
+    }, () => Option.some("test"))
+
+    expect(fnNonGen).type.toBe<
+      (this: unknown, a?: string | undefined) => Effect.Effect<string, NoSuchElementException, never>
+    >()
+
+    expect(fnGen).type.toBe<
+      (this: unknown, a?: string | undefined) => Effect.Effect<string, NoSuchElementException, never>
+    >()
+  })
+
+  it("ensureSuccessType", () => {
+    expect(Effect.succeed(123).pipe(Effect.ensureSuccessType<number>())).type.toBe<
+      Effect.Effect<number, never, never>
+    >()
+  })
+
+  it("ensureErrorType", () => {
+    const withoutError = Effect.succeed("no error")
+    expect(withoutError.pipe(Effect.ensureErrorType<never>())).type.toBe<Effect.Effect<string, never, never>>()
+
+    const withError = Effect.fail(new TestError1())
+    expect(withError.pipe(Effect.ensureErrorType<TestError1>())).type.toBe<Effect.Effect<never, TestError1, never>>()
+  })
+
+  it("ensureRequirementsType", () => {
+    const withoutRequirements = Effect.never
+    expect(withoutRequirements.pipe(Effect.ensureRequirementsType<never>())).type.toBe<
+      Effect.Effect<never, never, never>
+    >()
+
+    const withRequirement = Effect.flatMap(TestService, () => Effect.never)
+    expect(withRequirement.pipe(Effect.ensureRequirementsType<TestService>())).type.toBe<
+      Effect.Effect<never, never, TestService>
     >()
   })
 })

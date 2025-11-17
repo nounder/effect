@@ -1,10 +1,10 @@
 import { describe, it } from "@effect/vitest"
+import { assertLeft, assertRight, deepStrictEqual } from "@effect/vitest/utils"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Either from "effect/Either"
 import { pipe } from "effect/Function"
 import * as Ref from "effect/Ref"
-import { assertLeft, assertRight, deepStrictEqual } from "effect/test/util"
 import { strictEqual } from "node:assert"
 
 const exactlyOnce = <R, A, A1>(
@@ -197,9 +197,7 @@ describe("Effect", () => {
         Effect.succeed(0),
         Effect.filterOrFail((n) => n === 0)
       )
-      const goodCaseDataFirst = yield* pipe(
-        Effect.filterOrFail(Effect.succeed(0), (n) => n === 0)
-      )
+      const goodCaseDataFirst = yield* Effect.filterOrFail(Effect.succeed(0), (n) => n === 0)
       const badCase = yield* pipe(
         Effect.succeed(1),
         Effect.filterOrFail((n) => n === 0),

@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertNone, assertSome, deepStrictEqual, strictEqual, throws } from "@effect/vitest/utils"
 import {
   Array as Arr,
   Either,
@@ -11,7 +12,6 @@ import {
   type Predicate,
   String as Str
 } from "effect"
-import { assertNone, assertSome, deepStrictEqual, strictEqual, throws } from "effect/test/util"
 
 const symA = Symbol.for("a")
 const symB = Symbol.for("b")
@@ -332,6 +332,44 @@ describe("Array", () => {
       })
     })
 
+    describe("findFirstWithIndex", () => {
+      it("boolean-returning overloads", () => {
+        assertNone(pipe([], Arr.findFirstWithIndex((n) => n % 2 === 0)))
+        assertSome(pipe([1, 2, 3], Arr.findFirstWithIndex((n) => n % 2 === 0)), [2, 1])
+        assertSome(pipe([1, 2, 3, 4], Arr.findFirstWithIndex((n) => n % 2 === 0)), [2, 1])
+
+        assertNone(pipe(new Set<number>(), Arr.findFirstWithIndex((n) => n % 2 === 0)))
+        assertSome(pipe(new Set([1, 2, 3]), Arr.findFirstWithIndex((n) => n % 2 === 0)), [2, 1])
+        assertSome(pipe(new Set([1, 2, 3, 4]), Arr.findFirstWithIndex((n) => n % 2 === 0)), [2, 1])
+      })
+
+      it("Option-returning overloads", () => {
+        assertNone(
+          pipe([], Arr.findFirstWithIndex((n) => n % 2 === 0 ? Option.some(n + 1) : Option.none()))
+        )
+        assertSome(
+          pipe([1, 2, 3], Arr.findFirstWithIndex((n) => n % 2 === 0 ? Option.some(n + 1) : Option.none())),
+          [3, 1]
+        )
+        assertSome(
+          pipe([1, 2, 3, 4], Arr.findFirstWithIndex((n) => n % 2 === 0 ? Option.some(n + 1) : Option.none())),
+          [3, 1]
+        )
+
+        assertNone(
+          pipe(new Set<number>(), Arr.findFirstWithIndex((n) => n % 2 === 0 ? Option.some(n + 1) : Option.none()))
+        )
+        assertSome(
+          pipe(new Set([1, 2, 3]), Arr.findFirstWithIndex((n) => n % 2 === 0 ? Option.some(n + 1) : Option.none())),
+          [3, 1]
+        )
+        assertSome(
+          pipe(new Set([1, 2, 3, 4]), Arr.findFirstWithIndex((n) => n % 2 === 0 ? Option.some(n + 1) : Option.none())),
+          [3, 1]
+        )
+      })
+    })
+
     describe("findLast", () => {
       it("boolean-returning overloads", () => {
         assertNone(pipe([], Arr.findLast((n) => n % 2 === 0)))
@@ -450,6 +488,20 @@ describe("Array", () => {
       deepStrictEqual(pipe(new Set([]), Arr.remove(0)), [])
       deepStrictEqual(pipe(new Set([1, 2, 3]), Arr.remove(-1)), [1, 2, 3])
       deepStrictEqual(pipe(new Set([1, 2, 3]), Arr.remove(10)), [1, 2, 3])
+    })
+
+    it("removeOption", () => {
+      assertSome(pipe([1, 2, 3], Arr.removeOption(0)), [2, 3])
+      // out of bound
+      assertNone(pipe([], Arr.removeOption(0)))
+      assertNone(pipe([1, 2, 3], Arr.removeOption(-1)))
+      assertNone(pipe([1, 2, 3], Arr.removeOption(10)))
+
+      assertSome(pipe(new Set([1, 2, 3]), Arr.removeOption(0)), [2, 3])
+      // out of bound
+      assertNone(pipe(new Set([]), Arr.removeOption(0)))
+      assertNone(pipe(new Set([1, 2, 3]), Arr.removeOption(-1)))
+      assertNone(pipe(new Set([1, 2, 3]), Arr.removeOption(10)))
     })
 
     it("reverse", () => {
@@ -1259,6 +1311,11 @@ describe("Array", () => {
     deepStrictEqual(Arr.sortWith(arr, (x) => x.b, Order.number), [{ a: "b", b: 1 }, { a: "a", b: 2 }])
   })
 
+  it("countBy", () => {
+    deepStrictEqual(Arr.countBy([1, 2, 3, 4, 5], (n) => n % 2 === 0), 2)
+    deepStrictEqual(pipe([1, 2, 3, 4, 5], Arr.countBy((n) => n % 2 === 0)), 2)
+  })
+
   it("Do notation", () => {
     const _do = Arr.Do
     deepStrictEqual(_do, Arr.of({}))
@@ -1279,5 +1336,14 @@ describe("Array", () => {
 
     const doABCD = Arr.bind(doABC, "d", () => Arr.empty())
     deepStrictEqual(doABCD, [])
+
+    const doAB__proto__C = pipe(
+      Arr.let(doAB, "__proto__", (x) => [x.a, x.b, x.a + x.b]),
+      Arr.let("c", (x) => [x.a, x.b, x.a + x.b])
+    )
+    deepStrictEqual(doAB__proto__C, [
+      { a: "a", b: "b", c: ["a", "b", "ab"], ["__proto__"]: ["a", "b", "ab"] },
+      { a: "a", b: "ab", c: ["a", "ab", "aab"], ["__proto__"]: ["a", "ab", "aab"] }
+    ])
   })
 })

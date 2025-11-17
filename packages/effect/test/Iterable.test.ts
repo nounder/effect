@@ -1,7 +1,7 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Iterable as Iter, Number, Option, pipe } from "effect"
 import type { Predicate } from "effect/Predicate"
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 const symA = Symbol.for("a")
 const symB = Symbol.for("b")
@@ -450,5 +450,12 @@ describe("Iterable", () => {
     const log: Array<string> = []
     Iter.forEach(["a", "b", "c"], (a, i) => log.push(`${a}-${i}`))
     deepStrictEqual(log, ["a-0", "b-1", "c-2"])
+  })
+
+  it("countBy", () => {
+    deepStrictEqual(Iter.countBy([1, 2, 3, 4, 5], (n) => n % 2 === 0), 2)
+    deepStrictEqual(pipe([1, 2, 3, 4, 5], Iter.countBy((n) => n % 2 === 0)), 2)
+
+    deepStrictEqual(Iter.countBy(new Map([["a", 1], ["b", 2], ["c", 3]]), ([key, n]) => n % 2 === 1 && key !== "c"), 1)
   })
 })

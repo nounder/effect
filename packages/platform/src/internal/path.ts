@@ -83,7 +83,7 @@ function normalizeStringPosix(path: string, allowAboveRoot: boolean) {
       lastSlash = i
       dots = 0
     } else if (code === 46 /*.*/ && dots !== -1) {
-      ;++dots
+      ++dots
     } else {
       dots = -1
     }
@@ -105,28 +105,34 @@ function _format(sep: string, pathObject: Partial<Api.Path.Parsed>) {
 
 function fromFileUrl(url: URL): Effect.Effect<string, BadArgument> {
   if (url.protocol !== "file:") {
-    return Effect.fail(BadArgument({
-      module: "Path",
-      method: "fromFileUrl",
-      message: "URL must be of scheme file"
-    }))
+    return Effect.fail(
+      new BadArgument({
+        module: "Path",
+        method: "fromFileUrl",
+        description: "URL must be of scheme file"
+      })
+    )
   } else if (url.hostname !== "") {
-    return Effect.fail(BadArgument({
-      module: "Path",
-      method: "fromFileUrl",
-      message: "Invalid file URL host"
-    }))
+    return Effect.fail(
+      new BadArgument({
+        module: "Path",
+        method: "fromFileUrl",
+        description: "Invalid file URL host"
+      })
+    )
   }
   const pathname = url.pathname
   for (let n = 0; n < pathname.length; n++) {
     if (pathname[n] === "%") {
       const third = pathname.codePointAt(n + 2)! | 0x20
       if (pathname[n + 1] === "2" && third === 102) {
-        return Effect.fail(BadArgument({
-          module: "Path",
-          method: "fromFileUrl",
-          message: "must not include encoded / characters"
-        }))
+        return Effect.fail(
+          new BadArgument({
+            module: "Path",
+            method: "fromFileUrl",
+            description: "must not include encoded / characters"
+          })
+        )
       }
     }
   }
@@ -355,7 +361,7 @@ const posixImpl = Path.of({
     } else {
       toStart += lastCommonSep
       if (to.charCodeAt(toStart) === 47 /*/*/) {
-        ;++toStart
+        ++toStart
       }
       return to.slice(toStart)
     }

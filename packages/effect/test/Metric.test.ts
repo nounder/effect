@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import {
   Array,
   Clock,
@@ -16,7 +17,6 @@ import {
   pipe,
   Schedule
 } from "effect"
-import { assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 const labels = [MetricLabel.make("x", "a"), MetricLabel.make("y", "b")]
 
@@ -45,11 +45,9 @@ describe("Metric", () => {
       Effect.gen(function*() {
         const id = nextName()
         const counter = Metric.counter(id).pipe(Metric.taggedWithLabels(labels))
-        const result = yield* pipe(
-          Metric.increment(counter).pipe(
-            Effect.zipRight(Metric.increment(counter)),
-            Effect.zipRight(Metric.value(counter))
-          )
+        const result = yield* Metric.increment(counter).pipe(
+          Effect.zipRight(Metric.increment(counter)),
+          Effect.zipRight(Metric.value(counter))
         )
         deepStrictEqual(result, MetricState.counter(2))
       }))
@@ -382,6 +380,7 @@ describe("Metric", () => {
         strictEqual(result.min, 1)
         strictEqual(result.max, 3)
       }))
+
     it.effect("direct observe", () =>
       Effect.gen(function*() {
         const name = nextName()
@@ -398,31 +397,34 @@ describe("Metric", () => {
         strictEqual(result.min, 1)
         strictEqual(result.max, 3)
       }))
-    it.flakyTest(
-      Effect.gen(function*() {
-        const name = nextName()
-        const boundaries = MetricBoundaries.linear({ start: 0, width: 1, count: 10 })
-        const histogram = pipe(
-          Metric.histogram(name, boundaries),
-          Metric.taggedWithLabels(labels),
-          Metric.mapInput((duration: Duration.Duration) => Duration.toMillis(duration) / 1000)
-        )
-        // NOTE: trackDuration always uses the **real** Clock
-        const start = yield* Effect.sync(() => Date.now())
-        yield* pipe(Effect.sleep(Duration.millis(100)), Metric.trackDuration(histogram))
-        yield* pipe(Effect.sleep(Duration.millis(300)), Metric.trackDuration(histogram))
-        const end = yield* Effect.sync(() => Date.now())
-        const elapsed = end - start
-        const result = yield* Metric.value(histogram)
-        strictEqual(result.count, 2)
-        assertTrue(result.sum > 0.39)
-        assertTrue(result.sum <= elapsed)
-        assertTrue(result.min >= 0.1)
-        assertTrue(result.min < result.max)
-        assertTrue(result.max >= 0.3)
-        assertTrue(result.max < elapsed)
-      })
-    )
+
+    it.live("histogram with sleeps", () =>
+      it.flakyTest(
+        Effect.gen(function*() {
+          const name = nextName()
+          const boundaries = MetricBoundaries.linear({ start: 0, width: 1, count: 10 })
+          const histogram = pipe(
+            Metric.histogram(name, boundaries),
+            Metric.taggedWithLabels(labels),
+            Metric.mapInput((duration: Duration.Duration) => Duration.toMillis(duration) / 1000)
+          )
+          // NOTE: trackDuration always uses the **real** Clock
+          const start = yield* Effect.sync(() => Date.now())
+          yield* pipe(Effect.sleep(Duration.millis(100)), Metric.trackDuration(histogram))
+          yield* pipe(Effect.sleep(Duration.millis(300)), Metric.trackDuration(histogram))
+          const end = yield* Effect.sync(() => Date.now())
+          const elapsed = end - start
+          const result = yield* Metric.value(histogram)
+          strictEqual(result.count, 2)
+          assertTrue(result.sum > 0.39)
+          assertTrue(result.sum <= elapsed)
+          assertTrue(result.min >= 0.1)
+          assertTrue(result.min < result.max)
+          assertTrue(result.max >= 0.3)
+          assertTrue(result.max < elapsed)
+        })
+      ))
+
     it.effect("custom observe with mapInput", () =>
       Effect.gen(function*() {
         const name = nextName()
@@ -443,6 +445,7 @@ describe("Metric", () => {
         strictEqual(result.min, 1)
         strictEqual(result.max, 3)
       }))
+
     it.effect("observe + taggedWith", () =>
       Effect.gen(function*() {
         const name = nextName()
@@ -469,7 +472,26 @@ describe("Metric", () => {
         strictEqual(result2.count, 1)
         strictEqual(result3.count, 1)
       }))
+
+    it.effect("preserves precision of boundary values", () =>
+      Effect.gen(function*() {
+        const preciseBoundaries = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1]
+
+        const histogram = Metric.histogram(
+          "precision_test",
+          MetricBoundaries.fromIterable(preciseBoundaries)
+        )
+
+        const result = yield* Metric.value(histogram)
+
+        result.buckets.forEach(([boundary], index) => {
+          if (index < preciseBoundaries.length) {
+            strictEqual(boundary, preciseBoundaries[index])
+          }
+        })
+      }))
   })
+
   describe("Summary", () => {
     it.effect("custom observe as aspect", () =>
       Effect.gen(function*() {
@@ -479,7 +501,7 @@ describe("Metric", () => {
           maxAge: Duration.minutes(1),
           maxSize: 10,
           error: 0,
-          quantiles: [0, 1, 10]
+          quantiles: [0.25, 0.5, 0.75]
         }).pipe(
           Metric.taggedWithLabels(labels)
         )
@@ -493,6 +515,8 @@ describe("Metric", () => {
         strictEqual(result.sum, 4)
         strictEqual(result.min, 1)
         strictEqual(result.max, 3)
+        const medianQuantileValue = result.quantiles[1][1]
+        strictEqual(Option.getOrNull(medianQuantileValue), 1)
       }))
     it.effect("direct observe", () =>
       Effect.gen(function*() {
@@ -502,7 +526,7 @@ describe("Metric", () => {
           maxAge: Duration.minutes(1),
           maxSize: 10,
           error: 0,
-          quantiles: [0, 1, 10]
+          quantiles: [0.25, 0.5, 0.75]
         }).pipe(
           Metric.taggedWithLabels(labels)
         )
@@ -516,6 +540,8 @@ describe("Metric", () => {
         strictEqual(result.sum, 4)
         strictEqual(result.min, 1)
         strictEqual(result.max, 3)
+        const medianQuantileValue = result.quantiles[1][1]
+        strictEqual(Option.getOrNull(medianQuantileValue), 1)
       }))
     it.effect("custom observe with mapInput", () =>
       Effect.gen(function*() {
@@ -525,7 +551,7 @@ describe("Metric", () => {
           maxAge: Duration.minutes(1),
           maxSize: 10,
           error: 0,
-          quantiles: [0, 1, 10]
+          quantiles: [0.25, 0.5, 0.75]
         }).pipe(
           Metric.taggedWithLabels(labels),
           Metric.mapInput((s: string) => s.length)
@@ -540,6 +566,8 @@ describe("Metric", () => {
         strictEqual(result.sum, 4)
         strictEqual(result.min, 1)
         strictEqual(result.max, 3)
+        const medianQuantileValue = result.quantiles[1][1]
+        strictEqual(Option.getOrNull(medianQuantileValue), 1)
       }))
     it.effect("observeSummaryWith + taggedWith", () =>
       Effect.gen(function*() {
@@ -549,7 +577,7 @@ describe("Metric", () => {
           maxAge: Duration.minutes(1),
           maxSize: 10,
           error: 0,
-          quantiles: [0, 1, 10]
+          quantiles: [0.25, 0.5, 0.75]
         }).pipe(
           Metric.taggedWithLabels(labels),
           Metric.mapInput((s: string) => s.length)
@@ -570,6 +598,55 @@ describe("Metric", () => {
         strictEqual(result1.count, 0)
         strictEqual(result2.count, 1)
         strictEqual(result3.count, 1)
+      }))
+    it.effect("should return correct quantile when first chunk overshoots", () =>
+      Effect.gen(function*() {
+        const name = nextName()
+        // Samples: [10 (x6), 20, 30, 40, 50] (10 samples)
+        // Target rank for 0.5 quantile = 0.5 * 10 = 5
+        // Allowed error = (0.01 / 2) * 5 = 0.025. Range [4.975, 5.025]
+        // First chunk: 6 * 10. candConsumed = 6. 6 > 5.025
+        const samples = [10, 10, 10, 10, 10, 10, 20, 30, 40, 50]
+        const summary = Metric.summary({
+          name,
+          maxAge: Duration.minutes(1),
+          maxSize: 15,
+          error: 0.01,
+          quantiles: [0.5]
+        })
+
+        yield* Effect.forEach(samples, (value) => Metric.update(summary, value), { discard: true })
+
+        const result = yield* Metric.value(summary)
+
+        const medianQuantileValue = result.quantiles[0][1]
+
+        strictEqual(Option.getOrNull(medianQuantileValue), 10)
+      }))
+    it.effect("should return no values when no samples are present", () =>
+      Effect.gen(function*() {
+        const name = nextName()
+        const summary = Metric.summary({
+          name,
+          maxAge: Duration.minutes(1),
+          maxSize: 15,
+          error: 0.01,
+          quantiles: [0.5]
+        })
+
+        const result = yield* Metric.value(summary)
+
+        const medianQuantileValue = result.quantiles[0][1]
+        const minValue = result.min
+        const maxValue = result.max
+        const countValue = result.count
+        const sumValue = result.sum
+
+        strictEqual(Option.isNone(medianQuantileValue), true)
+        strictEqual(minValue, 0)
+        strictEqual(maxValue, 0)
+        strictEqual(countValue, 0)
+        strictEqual(sumValue, 0)
       }))
   })
   describe("Polling", () => {
@@ -681,4 +758,72 @@ describe("Metric", () => {
       )
       strictEqual(value._tag, "Some")
     }))
+  describe("trackSuccessWith", () => {
+    it.effect("infers types in Effectful pipes", () => {
+      const counter = Metric.counter("counter")
+      const frequency = Metric.frequency("frequency")
+      const gauge = Metric.gauge("gauge")
+      const histogram = Metric.histogram(
+        "histogram",
+        MetricBoundaries.linear({ start: 0, width: 10, count: 11 })
+      )
+      const summary = Metric.summary({
+        name: "summary",
+        maxAge: Duration.minutes(1),
+        maxSize: 10,
+        error: 0,
+        quantiles: [0.25, 0.5, 1]
+      })
+      return Effect.Do.pipe(
+        Effect.let("step1", () => 1),
+        Metric.trackSuccessWith(counter, ({ step1 }) => step1),
+        Effect.let("someThingElse", () => ({ a: 3 })),
+        Metric.trackSuccessWith(gauge, ({ step1 }) => step1),
+        Metric.trackSuccessWith(histogram, ({ step1 }) => step1),
+        Effect.let("anotherPartOfTheState", () => ({ b: "seven" })),
+        Metric.trackSuccessWith(summary, ({ step1 }) => step1),
+        Effect.let("step2", () => 4),
+        Effect.let("step3", () => "foo"),
+        Metric.trackSuccessWith(counter, ({ step2 }) => step2),
+        Effect.let("irrelevant", () => "irrelevant"),
+        Metric.trackSuccessWith(gauge, ({ step2 }) => step2),
+        Metric.trackSuccessWith(histogram, ({ step2 }) => step2),
+        Effect.let("moreIrrelevant", () => "moreIrrelevant"),
+        Metric.trackSuccessWith(summary, ({ step2 }) => step2),
+        Effect.let("otherStuff", () => ({ x: "otherStuff" })),
+        Metric.trackSuccessWith(frequency, ({ step3 }) => step3),
+        Effect.let("step4", () => "bar"),
+        Metric.trackSuccessWith(frequency, ({ step4 }) => step4),
+        Effect.bind("results", () =>
+          Effect.all({
+            counter: Metric.value(counter),
+            gauge: Metric.value(gauge),
+            histogram: Metric.value(histogram),
+            summary: Metric.value(summary),
+            frequency: Metric.value(frequency)
+          }))
+      ).pipe(
+        Effect.map(({ results }) => {
+          deepStrictEqual(results.counter, MetricState.counter(5))
+          deepStrictEqual(results.gauge, MetricState.gauge(4))
+          strictEqual(results.histogram.count, 2)
+          strictEqual(results.histogram.sum, 5)
+          strictEqual(results.histogram.min, 1)
+          strictEqual(results.histogram.max, 4)
+          strictEqual(results.summary.count, 2)
+          strictEqual(results.summary.sum, 5)
+          strictEqual(results.summary.min, 1)
+          strictEqual(results.summary.max, 4)
+          deepStrictEqual(results.summary.quantiles.map((x) => x[1]).map(Option.getOrNull), [1, 1, 4])
+          deepStrictEqual(
+            results.frequency.occurrences,
+            new Map([
+              ["bar", 1],
+              ["foo", 1]
+            ])
+          )
+        })
+      )
+    })
+  })
 })

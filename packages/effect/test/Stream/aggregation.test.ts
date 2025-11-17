@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertTrue, deepStrictEqual } from "@effect/vitest/utils"
 import * as Cause from "effect/Cause"
 import * as Chunk from "effect/Chunk"
 import * as Deferred from "effect/Deferred"
@@ -15,10 +16,9 @@ import * as Schedule from "effect/Schedule"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import * as Take from "effect/Take"
-import { assertTrue, deepStrictEqual } from "effect/test/util"
-import { chunkCoordination } from "effect/test/utils/coordination"
 import * as TestClock from "effect/TestClock"
 import * as TestServices from "effect/TestServices"
+import { chunkCoordination } from "../utils/coordination.js"
 
 describe("Stream", () => {
   it.effect("aggregate - simple example", () =>
@@ -234,7 +234,7 @@ describe("Stream", () => {
           pipe(
             Effect.fail("Boom"),
             Effect.when(() => n === 6),
-            Effect.zipRight(pipe(Queue.offer(queue, n)))
+            Effect.zipRight(Queue.offer(queue, n))
           )
         ),
         Stream.aggregateWithinEither(

@@ -39,22 +39,29 @@ export const run: <R2 = never>(
     const mysqlDump = (args: Array<string>) =>
       Effect.gen(function*() {
         const sql = yield* MysqlClient
+
+        const url = sql.config.url ? new URL(Redacted.value(sql.config.url)) : undefined
+
+        const host = url?.hostname ?? sql.config.host
+        const port = url?.port ?? sql.config.port?.toString()
+        const username = url?.username ?? sql.config.username
+        const password = url?.password ? Redacted.make(url.password) : sql.config.password
+        const database = url?.pathname?.slice(1) ?? sql.config.database
+
         const dump = yield* pipe(
           Command.make(
             "mysqldump",
-            ...(sql.config.username ? ["-u", sql.config.username] : []),
-            ...(sql.config.database ? [sql.config.database] : []),
+            ...(host ? ["-h", host] : []),
+            ...(port ? ["-P", port] : []),
+            ...(username ? ["-u", username] : []),
+            ...(password ? [`-p${Redacted.value(password)}`] : []),
+            ...(database ? [database] : []),
             "--skip-comments",
             "--compact",
             ...args
           ),
           Command.env({
-            PATH: (globalThis as any).process?.env.PATH,
-            MYSQL_HOST: sql.config.host,
-            MYSQL_TCP_PORT: sql.config.port?.toString(),
-            MYSQL_PWD: sql.config.password
-              ? Redacted.value(sql.config.password)
-              : undefined
+            PATH: (globalThis as any).process?.env.PATH
           }),
           Command.string
         )

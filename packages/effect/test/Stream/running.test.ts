@@ -1,11 +1,11 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import * as Chunk from "effect/Chunk"
 import * as Effect from "effect/Effect"
 import { pipe } from "effect/Function"
 import * as Ref from "effect/Ref"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from "effect/test/util"
 
 describe("Stream", () => {
   it.effect("runFoldWhile", () =>
@@ -46,12 +46,10 @@ describe("Stream", () => {
       yield* pipe(
         Stream.make(1, 1, 1, 1, 1, 1),
         Stream.runForEachWhile((n) =>
-          pipe(
-            Ref.modify(ref, (sum) =>
-              sum >= expected ?
-                [false, sum] as const :
-                [true, sum + n])
-          )
+          Ref.modify(ref, (sum) =>
+            sum >= expected ?
+              [false, sum] as const :
+              [true, sum + n])
         )
       )
       const result = yield* (Ref.get(ref))

@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertTrue, strictEqual, throws } from "@effect/vitest/utils"
 import * as A from "effect/Arbitrary"
 import * as Chunk from "effect/Chunk"
 import * as Data from "effect/Data"
@@ -10,7 +11,6 @@ import * as Hash from "effect/Hash"
 import * as Option from "effect/Option"
 import { isUnknown } from "effect/Predicate"
 import * as S from "effect/Schema"
-import { assertFalse, assertTrue, strictEqual, throws } from "effect/test/util"
 
 /**
  * Tests that the generated Eq is a valid Eq
@@ -343,6 +343,12 @@ schema (NeverKeyword): never`)
       assertTrue(equivalence([], []))
     })
 
+    it("should fail on non-array inputs", () => {
+      const schema = S.Tuple(S.String, S.Number)
+      const equivalence = S.equivalence(schema)
+      assertFalse(equivalence(["a", 1], null as never))
+    })
+
     it("e", () => {
       const schema = S.Tuple(MyString, MyNumber)
       const equivalence = S.equivalence(schema)
@@ -469,6 +475,12 @@ schema (NeverKeyword): never`)
       const equivalence = S.equivalence(schema)
 
       assertFalse(equivalence({}, {}))
+    })
+
+    it("should fail on non-record inputs", () => {
+      const schema = S.Struct({ a: S.String })
+      const equivalence = S.equivalence(schema)
+      assertFalse(equivalence({ a: "a" }, 1 as never))
     })
 
     it("string keys", () => {

@@ -1,7 +1,7 @@
 import * as Headers from "@effect/platform/Headers"
 import { describe, it } from "@effect/vitest"
+import { assertFalse, assertInclude, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Effect, FiberId, FiberRef, FiberRefs, HashSet, Inspectable, Logger, Redacted } from "effect"
-import { assertFalse, assertInclude, deepStrictEqual, strictEqual } from "effect/test/util"
 
 describe("Headers", () => {
   describe("Redactable", () => {
@@ -149,6 +149,60 @@ describe("Headers", () => {
         "sec-ret": Redacted.make("some"),
         "sec-ret-2": Redacted.make("some")
       })
+    })
+  })
+
+  describe("remove", () => {
+    it("one key", () => {
+      const headers = Headers.fromInput({
+        "Content-Type": "application/json",
+        "Authorization": "Bearer some-token",
+        "X-Api-Key": "some-key"
+      })
+
+      const removed = Headers.remove(headers, "Authorization")
+
+      deepStrictEqual(
+        removed,
+        Headers.fromInput({
+          "content-type": "application/json",
+          "x-api-key": "some-key"
+        })
+      )
+    })
+
+    it("multiple keys", () => {
+      const headers = Headers.fromInput({
+        "Content-Type": "application/json",
+        "Authorization": "Bearer some-token",
+        "X-Api-Key": "some-key"
+      })
+
+      const removed = Headers.remove(headers, ["Authorization", "authorization", "X-Api-Token", "x-api-key"])
+
+      deepStrictEqual(
+        removed,
+        Headers.fromInput({
+          "content-type": "application/json"
+        })
+      )
+    })
+
+    it("RegExp", () => {
+      const headers = Headers.fromInput({
+        "Authorization": "Bearer some-token",
+        "sec-ret": "some",
+        "sec-ret-2": "some"
+      })
+
+      const removed = Headers.remove(headers, [/^sec-/])
+
+      deepStrictEqual(
+        removed,
+        Headers.fromInput({
+          "authorization": "Bearer some-token"
+        })
+      )
     })
   })
 })
